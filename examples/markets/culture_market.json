@@ -1,0 +1,21 @@
+{
+  "market_id": "sample-culture-oscars-2026",
+  "title": "Will 'Stellar Dreams' win Best Picture at the 2027 Academy Awards?",
+  "question": "Will the film 'Stellar Dreams' win the Academy Award for Best Picture at the 2027 Oscars ceremony?",
+  "category": "culture",
+  "current_yes_price": 0.42,
+  "current_no_price": 0.58,
+  "resolution_criteria": "Market resolves YES if 'Stellar Dreams' officially wins the Academy Award for Best Picture at the 2027 Oscars ceremony. Market resolves NO if any other film wins or if the ceremony is cancelled.",
+  "protected_terms": [
+    "Stellar Dreams",
+    "Best Picture",
+    "Academy Awards",
+    "Oscars",
+    "2027",
+    "nomination",
+    "box office",
+    "critics",
+    "awards season",
+    "ceremony"
+  ]
+}
