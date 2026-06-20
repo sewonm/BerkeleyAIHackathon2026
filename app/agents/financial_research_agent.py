@@ -9,8 +9,6 @@ from app.schemas.market import Market
 from app.schemas.evidence import EvidenceChunk
 from app.services.kalshi_service import KalshiService
 
-_KALSHI_AVAILABLE = bool(os.getenv("KALSHI_KEY_ID"))
-
 
 class FinancialResearchAgent(BaseAgent):
     """
@@ -29,7 +27,7 @@ class FinancialResearchAgent(BaseAgent):
             name="FinancialResearchAgent",
             description="Fetches live Kalshi market microstructure data (price, volume, orderbook)"
         )
-        self.kalshi = KalshiService() if _KALSHI_AVAILABLE else None
+        self.kalshi = KalshiService() if os.getenv("KALSHI_API_KEY_ID") else None
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -38,7 +36,7 @@ class FinancialResearchAgent(BaseAgent):
     def run(self, market: Market) -> List[EvidenceChunk]:
         now = datetime.now(timezone.utc).isoformat()
 
-        if not _KALSHI_AVAILABLE:
+        if not self.kalshi:
             return self._mock_evidence(market, now)
 
         try:
@@ -58,18 +56,34 @@ class FinancialResearchAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _market_chunk(self, market: Market, raw: dict, now: str) -> EvidenceChunk:
-        last_price = raw.get("last_price", 0) / 100
-        prev_price = raw.get("previous_price", raw.get("last_price", 0)) / 100
-        price_change = ((last_price - prev_price) / prev_price * 100) if prev_price else 0.0
-        volume = raw.get("volume", 0)
+        # Kalshi API returns prices as dollar strings (0.0–1.0), not integer cents
+        yes_ask = float(raw.get("yes_ask_dollars") or 0)
+        yes_bid = float(raw.get("yes_bid_dollars") or 0)
+        yes_mid = (yes_ask + yes_bid) / 2 if (yes_ask + yes_bid) > 0 else 0.0
+
+        prev_ask = float(raw.get("previous_yes_ask_dollars") or 0)
+        prev_bid = float(raw.get("previous_yes_bid_dollars") or 0)
+        prev_mid = (prev_ask + prev_bid) / 2
+
+        if prev_mid > 0:
+            price_change = ((yes_mid - prev_mid) / prev_mid) * 100
+            price_change_str = f"{price_change:+.2f}%"
+        else:
+            price_change = None
+            price_change_str = "N/A (new market)"
+
+        volume = float(raw.get("volume_fp") or 0)
+        open_interest = float(raw.get("open_interest_fp") or 0)
 
         text = (
             f"=== Kalshi Market Data: {raw.get('title', market.market_id)} ===\n"
             f"Market ID: {market.market_id}\n"
             f"Question: {market.question}\n"
-            f"Current YES Price: {last_price:.2f} ({last_price * 100:.1f}¢)\n"
-            f"Price Change (recent): {price_change:+.2f}%\n"
-            f"Volume: {volume:,} contracts\n"
+            f"YES Ask: ${yes_ask:.2f} | YES Bid: ${yes_bid:.2f} | Mid: ${yes_mid:.2f}\n"
+            f"NO Ask:  ${float(raw.get('no_ask_dollars') or 0):.2f} | "
+            f"NO Bid: ${float(raw.get('no_bid_dollars') or 0):.2f}\n"
+            f"Price Change (recent): {price_change_str}\n"
+            f"Volume: {volume:,.2f} contracts | Open Interest: {open_interest:,.2f}\n"
             f"Status: {raw.get('status', 'unknown')} | "
             f"Closes: {raw.get('close_time', 'unknown')}\n"
         )
@@ -81,9 +95,12 @@ class FinancialResearchAgent(BaseAgent):
             timestamp=now,
             confidence=1.0,
             metadata={
-                "last_price": last_price,
-                "price_change_pct": round(price_change, 2),
+                "yes_mid": round(yes_mid, 4),
+                "yes_ask": yes_ask,
+                "yes_bid": yes_bid,
+                "price_change_pct": round(price_change, 2) if price_change is not None else None,
                 "volume": volume,
+                "open_interest": open_interest,
                 "status": raw.get("status"),
             },
         )

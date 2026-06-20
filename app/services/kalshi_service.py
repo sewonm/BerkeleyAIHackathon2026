@@ -18,7 +18,7 @@ class KalshiService:
     Kalshi API client with RSA request signing.
 
     Required env vars:
-        KALSHI_KEY_ID            — your API key ID from the Kalshi dashboard
+        KALSHI_API_KEY_ID        — your API key ID from the Kalshi dashboard
         KALSHI_PRIVATE_KEY_PATH  — path to your RSA private key .pem file
                                    OR set KALSHI_PRIVATE_KEY with inline PEM
                                    (replace literal newlines with \\n)
@@ -30,7 +30,7 @@ class KalshiService:
     def __init__(self, api_key: str = None, environment: str = None):
         env = environment or os.getenv("KALSHI_ENV", "demo")
         self.base_url = PROD_BASE if env == "production" else DEMO_BASE
-        self.key_id = os.getenv("KALSHI_KEY_ID", api_key)
+        self.key_id = os.getenv("KALSHI_API_KEY_ID", api_key)
         self._private_key = None  # lazy-loaded on first request
 
     # ------------------------------------------------------------------
@@ -63,7 +63,7 @@ class KalshiService:
         path should be the full API path, e.g. /trade-api/v2/markets/{ticker}
         """
         if not self.key_id:
-            raise ValueError("Set KALSHI_KEY_ID env var")
+            raise ValueError("Set KALSHI_API_KEY_ID env var")
 
         key = self._load_key()
         timestamp_ms = str(int(time.time() * 1000))
