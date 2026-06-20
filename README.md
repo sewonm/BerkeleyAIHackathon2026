@@ -44,6 +44,43 @@ The current MVP implements only the local text-based culture/web evidence pipeli
 
 ---
 
+## 🌐 Fetch.ai uAgents Deployment
+
+**NEW: The system is now available as standalone Fetch.ai uAgents!**
+
+Each functional component is deployed as an independent uAgent that can run on Agentverse:
+
+- ✅ **OrchestratorAgent** - User-facing coordinator (Port 8000)
+- ✅ **CultureWebAgent** - Evidence collector (Port 8001)
+- ✅ **CompressionAgent** - Context compressor (Port 8002)
+- ✅ **DecisionAgent** - Trading decision maker (Port 8003)
+
+**To run uAgents locally:**
+
+```bash
+cd uagents_deploy
+
+# Terminal 1
+python culture_web_agent.py
+
+# Terminal 2
+python compression_agent.py
+
+# Terminal 3
+python decision_agent.py
+
+# Terminal 4
+python orchestrator_agent.py
+```
+
+**To deploy to Agentverse:**
+
+See [AGENTVERSE_DEPLOYMENT.md](AGENTVERSE_DEPLOYMENT.md) for complete deployment instructions.
+
+Each agent communicates via standardized message protocols and can be deployed, scaled, and updated independently.
+
+---
+
 The system coordinates specialized agents that collect evidence from web, video, news, financial, culture, and market sources. Their raw outputs are passed through a token-aware compression layer, which removes low-signal context and keeps decision-relevant evidence. A decision agent then estimates market edge and, when trading is enabled, routes approved trades to Kalshi through a gated execution layer.
 
 ```text
