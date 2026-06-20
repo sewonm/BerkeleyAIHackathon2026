@@ -7,11 +7,12 @@ name = "kalshi-agent-compression"
 version = "0.1.0"
 description = "Multi-agent prediction market research with context compression"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
+    "uagents>=0.25.2",
 ]
 
 [project.optional-dependencies]
