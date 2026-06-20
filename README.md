@@ -2,6 +2,48 @@
 
 A multi-agent research and trading system for Kalshi-style prediction markets.
 
+---
+
+## 🚀 MVP Status
+
+**Current Implementation: Local Text-Based Culture Evidence Pipeline**
+
+This MVP demonstrates the core compression middleware using local sample data. The system runs entirely offline with no API keys required.
+
+**What Works Now:**
+- ✅ CultureWebAgent (reads from local sample file)
+- ✅ Context compression middleware (scorer, deduplicator, protected terms)
+- ✅ Deterministic decision agent
+- ✅ Full pipeline with compression metrics
+- ✅ Command-line demo
+
+**Scaffolded for Future (Not Active):**
+- 📋 SportsVideoAgent (placeholder)
+- 📋 PoliticsNewsAgent (placeholder)
+- 📋 FinancialResearchAgent (placeholder)
+- 📋 MarketAgent (placeholder)
+- 📋 Browserbase integration (service wrapper only)
+- 📋 Kalshi integration (service wrapper only)
+- 📋 Fetch.ai deployment (service wrapper only)
+- 📋 LLM-based decision making (service wrapper only)
+
+**To run the MVP:**
+
+```bash
+pip install -r requirements.txt
+python -m app.main
+```
+
+**To run tests:**
+
+```bash
+pytest
+```
+
+The current MVP implements only the local text-based culture/web evidence pipeline. Other agents are scaffolded but not active yet.
+
+---
+
 The system coordinates specialized agents that collect evidence from web, video, news, financial, culture, and market sources. Their raw outputs are passed through a token-aware compression layer, which removes low-signal context and keeps decision-relevant evidence. A decision agent then estimates market edge and, when trading is enabled, routes approved trades to Kalshi through a gated execution layer.
 
 ```text
