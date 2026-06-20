@@ -1,0 +1,35 @@
+{
+  "source_type": "video",
+  "market_question": "Will Brazil beat Mexico in the 2026 FIFA World Cup?",
+  "clip_description": "Brazil vs Mexico pregame warmup + press conference clip",
+  "clip_duration_seconds": 90,
+  "frames_sampled": 18,
+  "raw_tokens": 8400,
+  "frame_observations": [
+    {
+      "timestamp_seconds": 5,
+      "observation": "Brazil players warming up at high intensity, no visible players sitting out or holding injuries.",
+      "raw_tokens": 320
+    },
+    {
+      "timestamp_seconds": 20,
+      "observation": "Vinicius Jr performing sprint drills at full pace. Appears physically sharp.",
+      "raw_tokens": 290
+    },
+    {
+      "timestamp_seconds": 40,
+      "observation": "Mexico's Lozano seen jogging at reduced pace during warmup, receiving treatment from physio staff on right calf.",
+      "raw_tokens": 340
+    },
+    {
+      "timestamp_seconds": 60,
+      "observation": "Brazil coach addressing players in huddle. Body language appears confident and organized.",
+      "raw_tokens": 280
+    },
+    {
+      "timestamp_seconds": 75,
+      "observation": "Mexico goalkeeper practicing shot-stopping. Distribution looks sharp.",
+      "raw_tokens": 270
+    }
+  ]
+}

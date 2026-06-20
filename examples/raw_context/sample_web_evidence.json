@@ -1,0 +1,43 @@
+{
+  "source_type": "web",
+  "market_question": "Will Brazil beat Mexico in the 2026 FIFA World Cup?",
+  "raw_tokens": 24800,
+  "chunks": [
+    {
+      "source_name": "ESPN - World Cup Injury Report",
+      "url": "https://espn.com/soccer/story/brazil-injury-report-2026",
+      "raw_text": "Brazil midfielder Lucas Paqueta has been declared fully fit after missing training earlier this week with a minor hamstring strain. Manager Dorival Junior confirmed the squad is at full strength ahead of the crucial group stage match against Mexico. Brazil have won their last 6 consecutive matches against Mexico across all competitions.",
+      "raw_tokens": 680
+    },
+    {
+      "source_name": "BBC Sport - Mexico Preview",
+      "url": "https://bbc.com/sport/football/world-cup-mexico-preview",
+      "raw_text": "Mexico face their toughest test yet as they take on five-time world champions Brazil. Hirving Lozano is listed as doubtful with a calf injury sustained in the previous match. Mexico's defensive line has conceded 3 goals in their last two games. Manager Javier Aguirre says the team is focused but acknowledges Brazil's historical dominance in this fixture.",
+      "raw_tokens": 720
+    },
+    {
+      "source_name": "The Athletic - Tactical Preview",
+      "url": "https://theathletic.com/brazil-mexico-tactical-preview",
+      "raw_text": "Brazil enter this match as heavy favorites on all major prediction markets. Their pressing intensity has been elite this tournament, averaging 8.4 high-turnovers per 90 minutes. Mexico will likely sit deep in a 4-5-1 defensive block. The key battle is Brazil's wide attackers against Mexico's fullbacks, who have been their weakest defensive unit this World Cup.",
+      "raw_tokens": 710
+    },
+    {
+      "source_name": "Opta Stats Feed",
+      "url": "https://optasports.com",
+      "raw_text": "Brazil vs Mexico head to head: P18 W13 D3 L2. Brazil have scored in every World Cup match against Mexico. Expected goals (xG) model gives Brazil a 63% win probability for this fixture based on current form, squad quality, and tactical matchup. Brazil's Vinicius Jr has 3 goals and 2 assists in this tournament.",
+      "raw_tokens": 640
+    },
+    {
+      "source_name": "Reddit r/soccer - Fan Thread",
+      "url": "https://reddit.com/r/soccer/comments/brazil_mexico_world_cup",
+      "raw_text": "Brazil is going to win easily. Mexico always bottles it against top teams. Lozano injury is massive for Mexico. Brazil's midfield is too strong. This is a must-win for both teams though. Brazil need the win to secure top spot. Mexico need it to avoid a third-place group finish.",
+      "raw_tokens": 580
+    },
+    {
+      "source_name": "Goal.com - Match Preview",
+      "url": "https://goal.com/brazil-mexico-match-preview",
+      "raw_text": "Both Brazil and Mexico know that a win here could be decisive for group standings. Brazil have looked sharp in attack but faced questions about their defensive shape. Mexico's physicality could trouble Brazil in set pieces. The referee assigned is Felix Brych, known for strict card management.",
+      "raw_tokens": 590
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "market_question": "Will Brazil beat Mexico in the 2026 FIFA World Cup?",
+  "market_ticker": "FIFA-BRA-MEX-2026",
+  "sport": "soccer",
+  "event": "FIFA World Cup 2026",
+  "team_a": "Brazil",
+  "team_b": "Mexico",
+  "game_time": "2026-06-22T20:00:00Z",
+  "yes_price": 0.61,
+  "no_price": 0.39,
+  "implied_probability": 0.61,
+  "volume_usd": 48200,
+  "liquidity": "high",
+  "recent_movement": "YES moved from 0.55 to 0.61 in the last 12 hours",
+  "resolution_criteria": "Brazil wins their scheduled 2026 FIFA World Cup match against Mexico. The market resolves YES if Brazil wins in 90 minutes or extra time.",
+  "source": "Kalshi (demo/simulated — not financial advice)"
+}

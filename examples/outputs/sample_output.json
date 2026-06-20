@@ -1,0 +1,58 @@
+{
+  "market": "Will Brazil beat Mexico in the 2026 FIFA World Cup?",
+  "compression_metrics": {
+    "raw_context_tokens": 34400,
+    "compressed_tokens": 3820,
+    "compression_ratio": "9.01x",
+    "token_reduction_pct": 88.9,
+    "decision_preserved": true
+  },
+  "market_data": {
+    "yes_price": 0.61,
+    "implied_probability": 0.61,
+    "volume_usd": 48200
+  },
+  "decision": {
+    "estimated_probability": 0.69,
+    "market_probability": 0.61,
+    "edge": 0.08,
+    "recommendation": "YES",
+    "confidence": "medium-high",
+    "reasoning": [
+      "Video evidence confirms Brazil's full squad fitness including Vinicius Jr at full intensity.",
+      "Mexico's key attacker Lozano appears doubtful based on video and web reports.",
+      "Statistical models give Brazil a 63% win probability; our model adjusts upward for Lozano injury risk.",
+      "Brazil's head-to-head record against Mexico is historically dominant (W13/18 overall, W4/4 in World Cup).",
+      "Market price of 0.61 may not fully reflect the Lozano injury uncertainty confirmed in video."
+    ],
+    "risks": [
+      "Lozano injury status may be resolved before kickoff — monitor official lineup.",
+      "Mexico's defensive depth (4-5-1 block) can limit Brazil's attacking output.",
+      "Video evidence is from warmups, not in-game footage — confidence is moderate."
+    ],
+    "top_evidence": [
+      {
+        "claim": "Lozano seen receiving physio treatment on right calf during warmups.",
+        "source_type": "video",
+        "supports": "yes",
+        "confidence": 0.78,
+        "market_relevance": 0.91
+      },
+      {
+        "claim": "Brazil have won all 4 World Cup meetings against Mexico.",
+        "source_type": "stats",
+        "supports": "yes",
+        "confidence": 0.99,
+        "market_relevance": 0.85
+      },
+      {
+        "claim": "Mexico's Lozano listed as doubtful with calf injury per BBC Sport.",
+        "source_type": "web",
+        "supports": "yes",
+        "confidence": 0.82,
+        "market_relevance": 0.90
+      }
+    ],
+    "disclaimer": "Simulated research tool. Not financial advice. For educational and demonstration purposes only."
+  }
+}
