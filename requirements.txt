@@ -15,5 +15,9 @@ rich>=13.0.0
 # Fetch.ai uAgents (for Agentverse deployment)
 uagents>=0.12.0
 
+# Claude API (optional for advanced compression)
+anthropic>=0.18.0
+
 # Note: For the MVP standalone app, uagents is not required.
 # For Agentverse deployment, install with: pip install -r requirements.txt
+# For Claude-based claim extraction, set ANTHROPIC_API_KEY environment variable
