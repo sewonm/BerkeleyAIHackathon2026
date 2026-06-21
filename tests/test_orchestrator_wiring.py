@@ -16,8 +16,11 @@ Test class map:
   - TestRationaleVisibility (this plan, 2 tests) — DISPATCH-04 rationale+tier in reply text
 """
 
+import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -37,6 +40,9 @@ import orchestrator_agent as ORCH  # noqa: E402
 
 # RouterDecision imported from the package for test fixture construction.
 from uagents_deploy.router import RouterDecision  # noqa: E402
+
+# Message types for plan 02 dispatch / handoff tests.
+from uagents_deploy.protocols.messages import MarketRequest, EvidenceRequest  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -112,14 +118,82 @@ class TestTimeoutFallback:
 
 
 # ============================================================================
-# TestAckOrdering  (plan 02 — placeholder, not authored here)
+# Plan 02 shared helpers
+# ============================================================================
+
+def _fake_ctx():
+    """Return a minimal fake Context with AsyncMock send and MagicMock logger."""
+    ctx = SimpleNamespace()
+    ctx.send = AsyncMock()
+    ctx.logger = MagicMock()
+    return ctx
+
+
+def _evidence_sends(ctx):
+    """Return the ctx.send call_args_list entries whose payload is an EvidenceRequest."""
+    return [c for c in ctx.send.call_args_list if isinstance(c.args[1], EvidenceRequest)]
+
+
+def _make_market_request(**kwargs) -> MarketRequest:
+    """Build a MarketRequest with sensible defaults, overridable by kwargs."""
+    defaults = dict(
+        market_id="mr-test-001",
+        market_title="Test Market",
+        market_question="France World Cup 2026",
+        category="sports",
+        protected_terms=["France", "2026"],
+        resolution_criteria="TBD",
+        current_yes_price=0.5,
+        current_no_price=0.5,
+    )
+    defaults.update(kwargs)
+    return MarketRequest(**defaults)
+
+
+# ============================================================================
+# TestAckOrdering  (plan 02)
 # ============================================================================
 
 class TestAckOrdering:
     """
-    Plan 02 will add tests verifying ACK is sent before the router call.
-    Requires AsyncMock ctx — authored in plan 02 alongside the dispatch helper.
+    Verifies that the ChatAcknowledgement is sent BEFORE the router call fires
+    (SAFETY-03 ordering). Uses AsyncMock ctx + monkeypatched router_route so no
+    network or LLM call occurs.
     """
+
+    def test_ack_before_route(self, monkeypatch):
+        """First ctx.send call in handle_chat_message must be a ChatAcknowledgement.
+
+        Approach: patch ORCH.router_route to return a fixed sports RouterDecision so
+        no network/LLM occurs; build a ChatMessage with one TextContent; await the
+        handler via asyncio.run; assert call_args_list[0] carries a ChatAcknowledgement.
+        """
+        from uagents_deploy.router import RouterDecision
+
+        fixed_decision = RouterDecision(
+            category="sports",
+            target_agent_key="sports_video",
+            rewritten_query="France World Cup 2026",
+            protected_terms=["France", "2026"],
+            confidence=0.9,
+            rationale="sports tournament",
+            tier="heuristic",
+        )
+        monkeypatch.setattr(ORCH, "router_route", lambda q: fixed_decision)
+
+        ctx = _fake_ctx()
+        msg = ORCH.ChatMessage(
+            content=[ORCH.TextContent(text="Will the Lakers beat the Celtics tonight?")]
+        )
+
+        asyncio.run(ORCH.handle_chat_message(ctx, "agent1qsender", msg))
+
+        # The very first ctx.send must be a ChatAcknowledgement (ack before route)
+        assert ctx.send.call_args_list, "ctx.send was never called"
+        first_payload = ctx.send.call_args_list[0].args[1]
+        assert isinstance(first_payload, ORCH.ChatAcknowledgement), (
+            f"Expected ChatAcknowledgement as first send, got {type(first_payload).__name__!r}"
+        )
 
 
 # ============================================================================
@@ -176,25 +250,152 @@ class TestEvidenceMapping:
 
 
 # ============================================================================
-# TestSingleAgentDispatch  (plan 02 — placeholder, not authored here)
+# TestSingleAgentDispatch  (plan 02)
 # ============================================================================
 
 class TestSingleAgentDispatch:
     """
-    Plan 02 will add tests verifying single-agent dispatch replaces the fan-out.
-    Authored in plan 02 alongside the dispatch helper.
+    DISPATCH-02: handle_market_request must dispatch to exactly ONE chosen agent
+    (keyed by CATEGORY_TO_AGENT[msg.category] -> AGENT_ADDRESSES[target_key]),
+    not fan out to all three.
     """
+
+    def test_single_send_to_sports(self, monkeypatch):
+        """Exactly ONE EvidenceRequest is sent to the sports_video address."""
+        monkeypatch.setitem(ORCH.AGENT_ADDRESSES, "sports_video", "agent1qSPORTS")
+
+        mr = _make_market_request(category="sports")
+        ctx = _fake_ctx()
+
+        asyncio.run(ORCH.handle_market_request(ctx, "agent1qsender", mr))
+
+        ev_sends = _evidence_sends(ctx)
+        assert len(ev_sends) == 1, (
+            f"Expected exactly 1 EvidenceRequest send, got {len(ev_sends)}"
+        )
+        assert ev_sends[0].args[0] == "agent1qSPORTS", (
+            f"EvidenceRequest sent to wrong address: {ev_sends[0].args[0]!r}"
+        )
+
+        state = ORCH.analysis_state.get(str(mr.msg_id))
+        assert state is not None, "No analysis_state entry for this msg_id"
+        assert state.pending_agents == 1, (
+            f"Expected pending_agents=1, got {state.pending_agents}"
+        )
+        assert state.agents_used == ["sports_video"], (
+            f"Expected agents_used=['sports_video'], got {state.agents_used!r}"
+        )
+
+    def test_no_fan_out(self, monkeypatch):
+        """With all addresses set, exactly ONE EvidenceRequest is sent (no 3-way fan-out)."""
+        monkeypatch.setitem(ORCH.AGENT_ADDRESSES, "sports_video", "agent1qSPORTS")
+        monkeypatch.setitem(ORCH.AGENT_ADDRESSES, "financial_research", "agent1qFIN")
+        monkeypatch.setitem(ORCH.AGENT_ADDRESSES, "culture_web", "agent1qCULT")
+
+        mr = _make_market_request(category="sports")
+        ctx = _fake_ctx()
+
+        asyncio.run(ORCH.handle_market_request(ctx, "agent1qsender", mr))
+
+        ev_sends = _evidence_sends(ctx)
+        assert len(ev_sends) == 1, (
+            f"Fan-out NOT eliminated — expected 1 EvidenceRequest send, got {len(ev_sends)}"
+        )
+        sent_addrs = [c.args[0] for c in ev_sends]
+        assert "agent1qFIN" not in sent_addrs, "EvidenceRequest incorrectly sent to financial_research"
+        assert "agent1qCULT" not in sent_addrs, "EvidenceRequest incorrectly sent to culture_web"
 
 
 # ============================================================================
-# TestUnwiredHandoff  (plan 02 — placeholder, not authored here)
+# TestUnwiredHandoff  (plan 02)
 # ============================================================================
 
 class TestUnwiredHandoff:
     """
-    Plan 02 will add tests verifying the politics/none unwired handoff behavior.
-    Authored in plan 02 alongside the dispatch helper.
+    DISPATCH-03: when the chosen category has no wired address (politics/none),
+    or the address env var is unset, the orchestrator sends a clear
+    "no live agent wired yet" ChatMessage + EndSessionContent to the requester,
+    pops analysis_state[msg_id] (no stale pending-agents hang), and does NOT
+    send any EvidenceRequest.
     """
+
+    def _find_text_content_sends(self, ctx):
+        """Return ChatMessage sends whose content contains a TextContent."""
+        results = []
+        for c in ctx.send.call_args_list:
+            payload = c.args[1]
+            if isinstance(payload, ORCH.ChatMessage):
+                for item in payload.content:
+                    if isinstance(item, ORCH.TextContent):
+                        results.append(item.text)
+                        break
+        return results
+
+    def _find_end_session_sends(self, ctx):
+        """Return ChatMessage sends whose content contains EndSessionContent."""
+        results = []
+        for c in ctx.send.call_args_list:
+            payload = c.args[1]
+            if isinstance(payload, ORCH.ChatMessage):
+                for item in payload.content:
+                    if isinstance(item, ORCH.EndSessionContent):
+                        results.append(payload)
+                        break
+        return results
+
+    def test_politics_clean_handoff(self):
+        """category='politics' -> handoff text + EndSessionContent, NO EvidenceRequest."""
+        mr = _make_market_request(category="politics", market_question="Who wins the senate?")
+        ctx = _fake_ctx()
+
+        asyncio.run(ORCH.handle_market_request(ctx, "agent1qsender", mr))
+
+        ev_sends = _evidence_sends(ctx)
+        assert len(ev_sends) == 0, (
+            f"Expected NO EvidenceRequest for politics, got {len(ev_sends)}"
+        )
+
+        text_sends = self._find_text_content_sends(ctx)
+        assert any("no live agent wired yet" in t for t in text_sends), (
+            f"Expected 'no live agent wired yet' in a ChatMessage TextContent; got: {text_sends!r}"
+        )
+
+        end_sends = self._find_end_session_sends(ctx)
+        assert len(end_sends) >= 1, "Expected at least one EndSessionContent ChatMessage"
+
+    def test_unset_address_handoff(self, monkeypatch):
+        """category='sports' with AGENT_ADDRESSES['sports_video']=None -> clean handoff."""
+        monkeypatch.setitem(ORCH.AGENT_ADDRESSES, "sports_video", None)
+
+        mr = _make_market_request(category="sports")
+        ctx = _fake_ctx()
+
+        asyncio.run(ORCH.handle_market_request(ctx, "agent1qsender", mr))
+
+        ev_sends = _evidence_sends(ctx)
+        assert len(ev_sends) == 0, (
+            f"Expected NO EvidenceRequest when address is None, got {len(ev_sends)}"
+        )
+
+        text_sends = self._find_text_content_sends(ctx)
+        assert any("no live agent wired yet" in t for t in text_sends), (
+            f"Expected 'no live agent wired yet' in a ChatMessage; got: {text_sends!r}"
+        )
+
+        end_sends = self._find_end_session_sends(ctx)
+        assert len(end_sends) >= 1, "Expected EndSessionContent ChatMessage"
+
+    def test_analysis_state_cleared(self):
+        """category='politics' -> analysis_state entry is popped (no pending_agents==0 hang)."""
+        mr = _make_market_request(category="politics")
+        ctx = _fake_ctx()
+
+        asyncio.run(ORCH.handle_market_request(ctx, "agent1qsender", mr))
+
+        assert str(mr.msg_id) not in ORCH.analysis_state, (
+            "analysis_state still contains stale entry after unwired handoff — "
+            "pending_agents==0 forever-hang NOT guarded"
+        )
 
 
 # ============================================================================
