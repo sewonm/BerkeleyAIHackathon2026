@@ -1,130 +1,138 @@
-"""Decision agent - Simple deterministic implementation for MVP"""
+"""Decision agent — Claude-powered with heuristic fallback."""
 
+import os
 import re
+import json
 from typing import List
 
 from app.schemas.decision import Decision
 from app.schemas.market import Market
 
+_SYSTEM_PROMPT = """You are a prediction market trading analyst. Given compressed evidence about a market question, decide whether to bet YES, NO, or HOLD.
+
+Respond ONLY with a JSON object (no preamble, no code fences):
+{
+  "recommendation": "YES" | "NO" | "HOLD",
+  "confidence": <float 0.0-1.0>,
+  "fair_probability": <float 0.0-1.0>,
+  "reasoning": "<2-3 sentence explanation>",
+  "key_evidence": ["<evidence point 1>", "<evidence point 2>", "<evidence point 3>"],
+  "missing_info": ["<gap 1>", "<gap 2>"]
+}
+
+Rules:
+- YES if evidence strongly suggests the outcome will happen (fair_probability > market_yes_price + 0.05)
+- NO if evidence strongly suggests it won't happen (fair_probability < market_yes_price - 0.05)
+- HOLD if evidence is mixed, thin, or fair value is within 5 cents of market price
+- confidence: how certain you are in your recommendation (not the probability of YES)
+- fair_probability: your estimate of the true probability the market resolves YES
+- key_evidence: 3 specific facts from the evidence that drove your decision
+- missing_info: 2 things that would improve confidence if you knew them"""
+
 
 class DecisionAgent:
-    """
-    Agent that makes trading decisions based on compressed evidence.
-
-    For MVP, this uses a simple deterministic rule-based approach.
-    In production, this would use an LLM to analyze the compressed context.
-
-    The agent outputs:
-    - YES / NO / HOLD recommendation
-    - Confidence score
-    - Fair probability estimate
-    - Reasoning
-    - Key evidence
-    - Missing information
-    """
-
     def __init__(self):
         self.name = "DecisionAgent"
-        self.description = "Makes trading decisions from compressed evidence"
 
     def run(self, market: Market, compressed_context: str, kept_chunks: List[dict]) -> Decision:
-        """
-        Make a decision based on the compressed evidence.
+        # Try Claude first
+        try:
+            return self._run_claude(market, compressed_context)
+        except Exception:
+            pass
+        # Heuristic fallback
+        return self._run_heuristic(market, compressed_context, kept_chunks)
 
-        For MVP, uses simple heuristics:
-        - Look for positive/negative signal words
-        - Count evidence strength indicators
-        - Default to HOLD unless there's strong evidence
+    def _run_claude(self, market: Market, compressed_context: str) -> Decision:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError("No ANTHROPIC_API_KEY")
 
-        Args:
-            market: The market being analyzed
-            compressed_context: The compressed evidence text
-            kept_chunks: The chunks that were kept with scores
+        from anthropic import Anthropic
+        client = Anthropic(api_key=api_key)
 
-        Returns:
-            Decision object with recommendation and reasoning
-        """
-        # Simple sentiment analysis
+        user_msg = (
+            f"Market question: {market.question}\n"
+            f"Current YES price: {market.current_yes_price:.2f} (i.e. market implies {market.current_yes_price*100:.0f}% chance)\n\n"
+            f"Compressed evidence:\n{compressed_context[:4000]}"
+        )
+
+        resp = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=512,
+            messages=[
+                {"role": "user", "content": f"{_SYSTEM_PROMPT}\n\n{user_msg}"}
+            ],
+        )
+
+        raw = next((b.text for b in resp.content if hasattr(b, "text")), "")
+
+        # Parse JSON — try direct, then strip fences, then regex
+        data = None
+        for attempt in [raw, re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`")]:
+            try:
+                data = json.loads(attempt)
+                break
+            except Exception:
+                pass
+        if data is None:
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                data = json.loads(m.group(0))
+
+        rec = data.get("recommendation", "HOLD")
+        if rec not in ("YES", "NO", "HOLD"):
+            rec = "HOLD"
+
+        return Decision(
+            recommendation=rec,
+            confidence=round(float(data.get("confidence", 0.6)), 2),
+            fair_probability=round(float(data.get("fair_probability", market.current_yes_price)), 2),
+            reasoning=data.get("reasoning", ""),
+            key_evidence=data.get("key_evidence", []),
+            missing_info=data.get("missing_info", []),
+        )
+
+    def _run_heuristic(self, market: Market, compressed_context: str, kept_chunks: List[dict]) -> Decision:
         positive_signals = [
             'nomination', 'nominated', 'award', 'winner', 'won', 'leading',
             'frontrunner', 'favorite', 'strong', 'likely', 'expected',
             'confirmed', 'official', 'announced', 'success', 'acclaimed',
             'critic', 'praise', 'top', 'best', 'first', 'record'
         ]
-
         negative_signals = [
             'lost', 'failed', 'unlikely', 'weak', 'poor', 'criticism',
             'controversy', 'denied', 'rejected', 'cancelled', 'postponed',
             'doubt', 'question', 'uncertain', 'rumor'
         ]
 
-        neutral_signals = [
-            'maybe', 'possibly', 'unclear', 'unknown', 'unconfirmed',
-            'speculation', 'potential'
-        ]
+        ctx = compressed_context.lower()
+        pos = sum(1 for w in positive_signals if w in ctx)
+        neg = sum(1 for w in negative_signals if w in ctx)
+        strength = pos - neg
 
-        # Count signals in the compressed context
-        context_lower = compressed_context.lower()
-
-        positive_count = sum(1 for word in positive_signals if word in context_lower)
-        negative_count = sum(1 for word in negative_signals if word in context_lower)
-        neutral_count = sum(1 for word in neutral_signals if word in context_lower)
-
-        # Look for numbers and dates (usually increase confidence)
-        has_numbers = bool(re.search(r'\d+', compressed_context))
-        has_dates = bool(re.search(r'\b(january|february|march|april|may|june|july|august|september|october|november|december|\d{4})\b', context_lower))
-
-        # Calculate signal strength
-        signal_strength = positive_count - negative_count
-        total_signals = positive_count + negative_count + neutral_count
-
-        # Extract key evidence (top scored chunks)
         key_evidence = []
-        for chunk in kept_chunks[:5]:  # Top 5 chunks
-            text = chunk.get('text', '')
+        for chunk in kept_chunks[:5]:
+            text = chunk.get("text", "") if isinstance(chunk, dict) else getattr(chunk, "text", "")
             if len(text) > 100:
                 text = text[:97] + "..."
             key_evidence.append(text)
 
-        # Determine recommendation
-        if signal_strength >= 3 and positive_count >= 5:
-            recommendation = "YES"
-            confidence = min(0.75 + (signal_strength * 0.03), 0.90)
-            fair_probability = min(0.55 + (signal_strength * 0.02), 0.75)
-            reasoning = f"Strong positive signals detected ({positive_count} positive indicators). Evidence suggests favorable outcome."
-        elif signal_strength <= -3 and negative_count >= 5:
-            recommendation = "NO"
-            confidence = min(0.70 + (abs(signal_strength) * 0.03), 0.85)
-            fair_probability = max(0.30 - (abs(signal_strength) * 0.02), 0.20)
-            reasoning = f"Strong negative signals detected ({negative_count} negative indicators). Evidence suggests unfavorable outcome."
+        if strength >= 3 and pos >= 5:
+            rec, conf, fair = "YES", min(0.75 + strength * 0.03, 0.90), min(0.55 + strength * 0.02, 0.75)
+            reasoning = f"Strong positive signals ({pos} indicators). Evidence suggests favorable outcome."
+        elif strength <= -3 and neg >= 5:
+            rec, conf, fair = "NO", min(0.70 + abs(strength) * 0.03, 0.85), max(0.30 - abs(strength) * 0.02, 0.20)
+            reasoning = f"Strong negative signals ({neg} indicators). Evidence suggests unfavorable outcome."
         else:
-            recommendation = "HOLD"
-            confidence = 0.50 + (total_signals * 0.01)
-            fair_probability = 0.45 + (signal_strength * 0.02)
-            reasoning = f"Mixed or insufficient signals (positive: {positive_count}, negative: {negative_count}). More evidence needed."
-
-        # Adjust confidence based on data quality
-        if has_numbers:
-            confidence += 0.05
-        if has_dates:
-            confidence += 0.05
-
-        # Cap confidence
-        confidence = min(confidence, 0.95)
-
-        # Missing information (placeholder)
-        missing_info = [
-            "Real-time market data",
-            "Recent news updates",
-            "Expert analysis",
-            "Historical precedent data"
-        ]
+            rec, conf, fair = "HOLD", 0.55, market.current_yes_price
+            reasoning = f"Mixed signals (positive: {pos}, negative: {neg}). Insufficient evidence to take a position."
 
         return Decision(
-            recommendation=recommendation,
-            confidence=round(confidence, 2),
-            fair_probability=round(fair_probability, 2) if fair_probability else None,
+            recommendation=rec,
+            confidence=round(conf, 2),
+            fair_probability=round(fair, 2),
             reasoning=reasoning,
-            key_evidence=key_evidence,
-            missing_info=missing_info
+            key_evidence=key_evidence or ["No high-signal evidence extracted."],
+            missing_info=["Real-time market data", "Recent news updates"],
         )

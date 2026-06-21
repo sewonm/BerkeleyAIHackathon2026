@@ -60,7 +60,7 @@ async def _bb_fetch(url: str) -> str:
     async with httpx.AsyncClient(timeout=8) as client:
         r = await client.post(
             f"{BB_API_BASE}/fetch",
-            headers={"X-BB-API-Key": BROWSERBASE_API_KEY, "Content-Type": "application/json"},
+            headers={"X-BB-API-Key": os.getenv("BROWSERBASE_API_KEY") or BROWSERBASE_API_KEY, "Content-Type": "application/json"},
             json={"url": url, "format": "markdown"},
         )
         r.raise_for_status()
@@ -72,7 +72,7 @@ async def _serper_search(query: str, max_results: int) -> list[dict]:
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(
             "https://google.serper.dev/search",
-            headers={"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"},
+            headers={"X-API-KEY": os.getenv("SERPER_API_KEY") or SERPER_API_KEY, "Content-Type": "application/json"},
             json={"q": query, "num": max_results},
         )
         r.raise_for_status()
@@ -98,12 +98,14 @@ async def _bb_ddg_search(query: str, max_results: int) -> list[dict]:
 
 async def search_web(query: str, max_results: int = 5) -> list[dict]:
     """Serper first, Browserbase/DDG second. Returns [] if no provider succeeds."""
-    if SERPER_API_KEY:
+    serper_key = os.getenv("SERPER_API_KEY") or SERPER_API_KEY
+    bb_key = os.getenv("BROWSERBASE_API_KEY") or BROWSERBASE_API_KEY
+    if serper_key:
         try:
             return await _serper_search(query, max_results)
         except Exception as e:
             print(f"[culture_web_agent] Serper failed: {e}")
-    if BROWSERBASE_API_KEY:
+    if bb_key:
         try:
             return await _bb_ddg_search(query, max_results)
         except Exception as e:
@@ -162,7 +164,9 @@ async def collect_bundle(question: str, category: str = "culture", protected_ter
     Returns ``(list[EvidenceChunkMsg], meta)``. Demo-safe ladder:
     live (Serper/Browserbase) -> stub. Never raises.
     """
-    if not LIVE_AVAILABLE:
+    # Re-check at call time in case keys were loaded after module import (e.g. dotenv in bridge)
+    live = bool(os.getenv("SERPER_API_KEY") or os.getenv("BROWSERBASE_API_KEY"))
+    if not live:
         return build_stub_bundle(question), {"source": "stub", "providers": [], "queries": 0}
 
     observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -171,51 +175,65 @@ async def collect_bundle(question: str, category: str = "culture", protected_ter
     providers: set[str] = set()
     seen_urls: set[str] = set()
 
-    for template, kind in _QUERY_TEMPLATES:
+    # Run all search queries concurrently.
+    async def _search_one(template, kind):
         query = template.format(q=question or "")
         try:
-            results = await search_web(query, max_results=2)
+            results = await asyncio.wait_for(search_web(query, max_results=2), timeout=12.0)
         except Exception:
             results = []
+        return query, kind, results
 
+    search_tasks = [_search_one(t, k) for t, k in _QUERY_TEMPLATES]
+    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+    # Collect all hits, dedup by URL.
+    pending: list[tuple[str, str, str, str, str]] = []  # (url, title, snippet, provider, query, kind)
+    for item in search_results:
+        if isinstance(item, Exception):
+            continue
+        query, kind, results = item
         for hit in results:
             url = hit.get("url", "")
-            if url and url in seen_urls:
+            if not url or url in seen_urls:
                 continue
             seen_urls.add(url)
+            pending.append((url, hit.get("title", ""), hit.get("snippet", ""), hit.get("provider", "web"), query, kind))
 
-            title = hit.get("title", "")
-            snippet = hit.get("snippet", "")
-            provider = hit.get("provider", "web")
+    # Fetch all pages concurrently with a tight 3s timeout per URL.
+    async def _fetch_one(url, title, snippet, provider, query, kind):
+        content = snippet
+        if url and not url.startswith("stub://"):
+            try:
+                fetched = await asyncio.wait_for(fetch_as_markdown(url), timeout=8.0)
+                if fetched.strip():
+                    content = fetched[:2000]
+            except Exception:
+                pass
+        return url, title, content, provider, query, kind
 
-            # Use the search snippet directly — fast and reliable within the
-            # 30s collection timeout. Optionally try a quick page fetch (5s
-            # cap) for enrichment, but never block on it.
-            content = snippet
-            if url and not url.startswith("stub://"):
-                try:
-                    fetched = await asyncio.wait_for(fetch_as_markdown(url), timeout=5.0)
-                    if fetched.strip():
-                        content = fetched[:2000]
-                except Exception:
-                    pass  # snippet is good enough
+    fetch_tasks = [_fetch_one(*p) for p in pending]
+    fetch_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
-            if not content.strip():
-                continue
-
-            providers.add(provider)
-            chunks.append(EvidenceChunkMsg(
-                source_type="culture_web",
-                text=(
-                    f"=== Culture/Web Source: {title} ===\n"
-                    f"URL: {url}\nQuery: {query}\n\n{content}"
-                ),
-                source_url=url,
-                timestamp=now_iso,
-                confidence=0.8,
-                metadata={"kind": kind, "fetched_via": provider, "source_strength": "web",
-                          "observed_at": observed_at, "query": query, "title": title},
-            ))
+    for item in fetch_results:
+        if isinstance(item, Exception):
+            continue
+        url, title, content, provider, query, kind = item
+        if not content.strip():
+            continue
+        providers.add(provider)
+        chunks.append(EvidenceChunkMsg(
+            source_type="culture_web",
+            text=(
+                f"=== Culture/Web Source: {title} ===\n"
+                f"URL: {url}\nQuery: {query}\n\n{content}"
+            ),
+            source_url=url,
+            timestamp=now_iso,
+            confidence=0.8,
+            metadata={"kind": kind, "fetched_via": provider, "source_strength": "web",
+                      "observed_at": observed_at, "query": query, "title": title},
+        ))
 
     if len(chunks) < 2:  # nothing useful came back -> stub so a reply is never empty
         return build_stub_bundle(question), {"source": "stub", "providers": sorted(providers), "queries": len(_QUERY_TEMPLATES)}
