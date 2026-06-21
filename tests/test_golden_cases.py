@@ -177,3 +177,103 @@ class TestGoldenLLM:
             f"[{case_id}] Expected category={expected_cat!r}, got {result.category!r}"
         )
         assert result.tier == "llm"
+
+
+# ---------------------------------------------------------------------------
+# class TestKeylessDrill
+# ---------------------------------------------------------------------------
+
+class TestKeylessDrill:
+    """TEST-03: keyless end-to-end run via deterministic fallback tier.
+
+    Each test uses monkeypatch.delenv("ASI1_API_KEY", raising=False) to guarantee
+    the key is absent during that specific test, forcing route() to fall to the
+    heuristic tier. This proves the never-fail ladder works end-to-end with zero keys.
+    """
+
+    def test_keyless_sports_routes_correctly(self, monkeypatch):
+        """No ASI1_API_KEY -> route() uses heuristic, produces valid sports decision."""
+        monkeypatch.delenv("ASI1_API_KEY", raising=False)
+        result = route("Will the Lakers beat the Celtics tonight?")
+        assert result.category == "sports"
+        assert result.target_agent_key == "sports_video"
+        assert result.tier == "heuristic"
+        assert isinstance(result.rewritten_query, str) and len(result.rewritten_query) > 0
+        assert isinstance(result.rationale, str) and len(result.rationale) > 0
+        assert 0.0 <= result.confidence <= 1.0
+
+    def test_keyless_financial_routes_correctly(self, monkeypatch):
+        """No ASI1_API_KEY -> route() routes Bitcoin question to financial via heuristic."""
+        monkeypatch.delenv("ASI1_API_KEY", raising=False)
+        result = route("Will Bitcoin reach $100k by end of 2026?")
+        assert result.category == "financial"
+        assert result.target_agent_key == "financial_research"
+        assert result.tier == "heuristic"
+
+    def test_keyless_politics_clean_handoff(self, monkeypatch):
+        """No ASI1_API_KEY -> route() routes politics to category='politics', target_key=None."""
+        monkeypatch.delenv("ASI1_API_KEY", raising=False)
+        result = route("Will the incumbent party win the 2026 US midterms?")
+        assert result.category == "politics"
+        assert result.target_agent_key is None  # no agent wired for politics
+        assert result.tier == "heuristic"
+
+    def test_keyless_ood_returns_none_category(self, monkeypatch):
+        """No ASI1_API_KEY -> OOD question routes to category='none'."""
+        monkeypatch.delenv("ASI1_API_KEY", raising=False)
+        result = route("asdfgh qwerty 123")
+        assert result.category == "none"
+        assert result.target_agent_key is None
+
+
+# ---------------------------------------------------------------------------
+# class TestUnreachableHostDrill
+# ---------------------------------------------------------------------------
+
+class TestUnreachableHostDrill:
+    """Confirm the never-fail ladder holds when the LLM host is unreachable.
+
+    Uses patch("openai.OpenAI") — surgical and process-safe. When openai.OpenAI is
+    patched with side_effect=ConnectionError, _call_asi1() raises synchronously before
+    any real network attempt. _handle_provider_error converts this to ChatResult(ok=False),
+    _route_llm() returns None, and route() falls to _route_heuristic().
+
+    Do NOT use socket.setdefaulttimeout — it leaks globally and breaks sibling tests.
+    """
+
+    def test_unreachable_host_falls_to_heuristic(self, monkeypatch):
+        """LLM pointing at unreachable host -> heuristic fallback, valid decision, fast."""
+        monkeypatch.setenv("ASI1_API_KEY", "sk-fake-key")  # key present so svc.available=True
+
+        with patch("openai.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.side_effect = ConnectionError(
+                "Connection refused: unreachable host"
+            )
+            result = route("Will France win the World Cup 2026?")
+
+        assert result.tier == "heuristic", (
+            f"Expected heuristic fallback on unreachable host, got tier={result.tier!r}"
+        )
+        assert result.category == "sports"
+        assert result.target_agent_key == "sports_video"
+
+    def test_five_runs_identical(self, monkeypatch):
+        """Same question routes identically across 5 heuristic calls (determinism check).
+
+        The heuristic path is pure: str operations + float arithmetic + dict with
+        insertion-order determinism (Python 3.7+). No randomness, no time.time, no I/O.
+        5 calls MUST produce identical RouterDecision fields.
+
+        Note: protected_terms is also deterministic, but we avoid list comparison
+        per RESEARCH.md Pitfall 5 — keep assertions focused and non-fragile.
+        """
+        monkeypatch.delenv("ASI1_API_KEY", raising=False)  # force heuristic path
+        question = "Will France win the World Cup 2026?"
+        results = [route(question) for _ in range(5)]
+        for i in range(1, 5):
+            assert results[i].category == results[0].category, f"run {i}: category differs"
+            assert results[i].confidence == results[0].confidence, f"run {i}: confidence differs"
+            assert results[i].tier == results[0].tier, f"run {i}: tier differs"
+            assert results[i].target_agent_key == results[0].target_agent_key, (
+                f"run {i}: target_agent_key differs"
+            )
