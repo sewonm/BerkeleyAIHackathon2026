@@ -29,9 +29,10 @@ export default function MarketInput({ onAnalyze }: Props) {
   const handleSubmit = () => {
     if (!question.trim()) return;
     const sample = SAMPLE_MARKETS.find((m) => m.ticker === ticker);
+    const effectiveTicker = ticker.trim() || "";
     onAnalyze(
       question,
-      ticker || "CUSTOM-MARKET",
+      effectiveTicker,
       sample?.yesPrice ?? 0.5,
       sample?.category ?? "auto"
     );
@@ -71,12 +72,15 @@ export default function MarketInput({ onAnalyze }: Props) {
           />
         </div>
         <div className="flex flex-col gap-2">
-          <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">
-            Kalshi Ticker
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">
+              Kalshi Ticker
+            </label>
+            <span className="text-zinc-600 text-xs">Optional — leave blank for custom questions</span>
+          </div>
           <input
             className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-teal-500/60 focus:bg-zinc-800 transition font-mono text-sm"
-            placeholder="FED-RATES-JUL26"
+            placeholder="e.g. FED-RATES-JUL26 (leave blank to ask any question)"
             value={ticker}
             onChange={(e) => setTicker(e.target.value)}
           />

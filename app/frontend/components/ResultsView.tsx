@@ -53,7 +53,7 @@ export default function ResultsView({ result, agents = [], execution, question, 
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-teal-500 text-xs font-mono mb-1">{ticker}</p>
+          {ticker && <p className="text-teal-500 text-xs font-mono mb-1">{ticker}</p>}
           <h2 className="text-white text-xl font-semibold leading-snug">{question}</h2>
         </div>
         <button

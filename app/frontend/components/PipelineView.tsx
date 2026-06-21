@@ -81,7 +81,7 @@ export default function PipelineView({ question, ticker, yesPrice, category, onC
     <div className="flex flex-col gap-6 fade-in-up">
       {/* Market header */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-        <p className="text-teal-500 text-xs font-mono mb-1">{ticker}</p>
+        {ticker && <p className="text-teal-500 text-xs font-mono mb-1">{ticker}</p>}
         <h2 className="text-white text-lg font-semibold leading-snug">{question}</h2>
         <div className="flex items-center gap-2 mt-3">
           <span className="text-xs text-zinc-500">YES price</span>
