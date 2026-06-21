@@ -37,7 +37,14 @@ export default function PipelineView({ question, ticker, yesPrice, category, onC
   const startedRef = useRef(false);
 
   // Derive which agent will be dispatched from category hint so we can show it immediately
-  const pendingCategory = category && !["auto", "custom", ""].includes(category) ? category : "culture";
+  const pendingCategory = (() => {
+    if (category && !["auto", "custom", ""].includes(category)) return category;
+    // Client-side keyword guess so the loading card shows the right agent
+    const q = question.toLowerCase();
+    if (/nba|nfl|mlb|nhl|soccer|football|basketball|baseball|hockey|world cup|playoff|lakers|yankees|lebron|nba|sport|game|match|player|team|championship|win the|beat/.test(q)) return "sports";
+    if (/bitcoin|btc|eth|crypto|fed|rate|interest|inflation|stock|s&p|nasdaq|gdp|earnings|cpi/.test(q)) return "financial";
+    return "culture";
+  })();
   const pendingMeta = AGENT_META[pendingCategory] ?? AGENT_META["culture"];
 
   useEffect(() => {

@@ -1,7 +1,12 @@
 import os
 import sys
+import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Windows fix: prevent "Event loop is closed" RuntimeError on shutdown
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # This file is run from uagents_deploy/, so we manually add the repo root.
 # That allows imports like app.schemas.execution and app.services.kalshi_executor.

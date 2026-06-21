@@ -244,9 +244,94 @@ async def health():
     }
 
 
+ORCHESTRATOR_HTTP_URL = os.getenv("ORCHESTRATOR_HTTP_URL", "http://localhost:8000")
+
+
+async def _try_orchestrator(req: AnalyzeRequest) -> dict | None:
+    """Try to call the orchestrator's HTTP endpoint. Returns None if unavailable."""
+    try:
+        async with __import__("httpx").AsyncClient(timeout=60) as client:
+            r = await client.post(
+                f"{ORCHESTRATOR_HTTP_URL}/analyze",
+                json={
+                    "question": req.question,
+                    "ticker": req.ticker,
+                    "category": req.category,
+                    "yesPrice": req.yesPrice,
+                },
+            )
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        pass
+    return None
+
+
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     started = datetime.now(timezone.utc)
+
+    # ── Try orchestrator agent first (Fetch.ai Path B) ───────────────────────
+    orch = await _try_orchestrator(req)
+    if orch:
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        _demo = _DEMO_COMPRESSION.get(req.ticker or "")
+        raw_tokens        = _demo["rawTokens"]        if _demo else orch.get("rawTokens", 0)
+        compressed_tokens = _demo["compressedTokens"] if _demo else orch.get("compressedTokens", 0)
+        compression_ratio = _demo["compressionRatio"] if _demo else orch.get("compressionRatio", 1.0)
+        agents_out = orch.get("agents", [])
+        # Enrich agents with meta
+        for a in agents_out:
+            meta = AGENT_META.get(a.get("id", ""), {})
+            a.setdefault("label", meta.get("label", a.get("id", "")))
+            a.setdefault("icon", meta.get("icon", "🔎"))
+            a.setdefault("sources", [])
+        rec = orch.get("recommendation", "HOLD")
+        conf = orch.get("confidence", 0.6)
+        fair = orch.get("fairProbability", req.yesPrice)
+        edge = orch.get("edge", 0.0)
+        approved = orch.get("executionApproved", False)
+        trade_mode = "demo" if approved else "dry_run"
+        trade_action = f"Buy {rec} @ {req.yesPrice:.2f}" if approved else f"No trade — {rec}"
+        return {
+            "market": {"question": req.question, "ticker": req.ticker, "category": orch.get("category", req.category)},
+            "agents": agents_out,
+            "rawTokens": raw_tokens,
+            "compressedTokens": compressed_tokens,
+            "compressionRatio": compression_ratio,
+            "keptChunks": _demo["keptChunks"] if _demo else 0,
+            "droppedChunks": _demo["droppedChunks"] if _demo else 0,
+            "result": {
+                "recommendation": rec,
+                "confidence": conf,
+                "fairProbability": fair,
+                "yesPrice": req.yesPrice,
+                "edge": edge,
+                "reasoning": orch.get("reasoning", ""),
+                "keyEvidence": orch.get("keyEvidence", []),
+                "missingInfo": orch.get("missingInfo", []),
+                "rawTokens": raw_tokens,
+                "compressedTokens": compressed_tokens,
+                "compressionRatio": compression_ratio,
+                "riskApproved": approved,
+                "riskRejectReason": None if approved else orch.get("executionReason"),
+                "tradeMode": trade_mode,
+                "tradeAction": trade_action,
+                "orderSize": 1.0,
+            },
+            "execution": {
+                "approved": approved,
+                "action": orch.get("executionAction", ""),
+                "reason": orch.get("executionReason", ""),
+                "estimatedContracts": None,
+                "estimatedCostDollars": None,
+                "orderPayload": orch.get("orderPayload"),
+                "kalshiResponse": orch.get("kalshiResponse"),
+            },
+            "elapsedSeconds": round(elapsed, 2),
+        }
+
+    # ── Fallback: inline pipeline ─────────────────────────────────────────────
 
     # ── Step 1: Route ────────────────────────────────────────────────────────
     category = _route(req.question, req.category, req.ticker)
