@@ -98,7 +98,7 @@ export default function ResultsView({ result, agents = [], execution, question, 
             <div className="text-center">
               <p className="text-zinc-500 text-xs mb-0.5">Fair value</p>
               <p className="text-zinc-100 text-xl font-bold font-mono">{(result.fairProbability * 100).toFixed(0)}¢</p>
-              <p className="text-zinc-700 text-xs">market {(result.yesPrice * 100).toFixed(0)}¢</p>
+              <p className="text-zinc-500 text-xs">market {(result.yesPrice * 100).toFixed(0)}¢</p>
             </div>
             <div className="text-center">
               <p className="text-zinc-500 text-xs mb-0.5">Edge</p>
@@ -115,7 +115,7 @@ export default function ResultsView({ result, agents = [], execution, question, 
         <div className="flex items-center gap-4 py-2">
           <div>
             <p className="text-lg font-bold font-mono text-zinc-300">{result.rawTokens.toLocaleString()}</p>
-            <p className="text-xs text-zinc-600 mt-0.5">raw tokens</p>
+            <p className="text-xs text-zinc-500 mt-0.5">raw tokens</p>
           </div>
           <div className="flex-1 flex items-center gap-2">
             <div className="h-px flex-1 bg-zinc-800" />
@@ -126,10 +126,10 @@ export default function ResultsView({ result, agents = [], execution, question, 
           </div>
           <div className="text-right">
             <p className="text-lg font-bold font-mono text-teal-400">{result.compressedTokens.toLocaleString()}</p>
-            <p className="text-xs text-zinc-600 mt-0.5">to Claude</p>
+            <p className="text-xs text-zinc-500 mt-0.5">to Claude</p>
           </div>
         </div>
-        <p className="text-zinc-700 text-xs mt-1">
+        <p className="text-zinc-500 text-xs mt-1">
           {(result.rawTokens - result.compressedTokens).toLocaleString()} tokens removed · {(((result.rawTokens - result.compressedTokens) / result.rawTokens) * 100).toFixed(0)}% reduction
         </p>
       </Section>
@@ -159,7 +159,7 @@ export default function ResultsView({ result, agents = [], execution, question, 
                 </span>
               </div>
             ))}
-            <p className="text-zinc-700 text-xs mt-1 border-t border-zinc-800/60 pt-3">
+            <p className="text-zinc-500 text-xs mt-1 border-t border-zinc-800/60 pt-3">
               {usedAgents.length} agent dispatched via Fetch.ai uAgents · {totalChunks} evidence chunks collected
             </p>
           </div>
@@ -183,10 +183,10 @@ export default function ResultsView({ result, agents = [], execution, question, 
         <p className="text-sm text-zinc-400 leading-relaxed mt-1">{result.reasoning}</p>
         {result.missingInfo.length > 0 && (
           <div className="mt-4 pt-4 border-t border-zinc-800/60">
-            <p className="text-zinc-600 text-xs uppercase tracking-widest mb-2">Information gaps</p>
+            <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">Information gaps</p>
             <ul className="flex flex-col gap-1.5">
               {result.missingInfo.map((m, i) => (
-                <li key={i} className="text-xs text-zinc-600 flex gap-2">
+                <li key={i} className="text-xs text-zinc-500 flex gap-2">
                   <span className="shrink-0">—</span>{m}
                 </li>
               ))}
@@ -221,7 +221,7 @@ export default function ResultsView({ result, agents = [], execution, question, 
         <Section title="Trade Executor">
           <div className="flex flex-col gap-2.5 mt-1 text-xs">
             <div className="flex justify-between items-center">
-              <span className="text-zinc-600">Mode</span>
+              <span className="text-zinc-500">Mode</span>
               <span className={`font-mono px-2 py-0.5 rounded-full border ${
                 result.tradeMode === "demo"
                   ? "border-teal-500/25 bg-teal-500/8 text-teal-400"
@@ -229,18 +229,18 @@ export default function ResultsView({ result, agents = [], execution, question, 
               }`}>{result.tradeMode}</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-zinc-600">Action</span>
+              <span className="text-zinc-500">Action</span>
               <span className="font-mono text-zinc-300">{execution?.action ?? "—"}</span>
             </div>
             {execution?.estimatedContracts != null && (
               <div className="flex justify-between items-center">
-                <span className="text-zinc-600">Contracts</span>
+                <span className="text-zinc-500">Contracts</span>
                 <span className="font-mono text-zinc-300">{execution.estimatedContracts}</span>
               </div>
             )}
             {execution?.estimatedCostDollars != null && (
               <div className="flex justify-between items-center">
-                <span className="text-zinc-600">Cost</span>
+                <span className="text-zinc-500">Cost</span>
                 <span className="font-mono text-zinc-300">${execution.estimatedCostDollars.toFixed(2)}</span>
               </div>
             )}
@@ -254,10 +254,10 @@ export default function ResultsView({ result, agents = [], execution, question, 
           </div>
           {execution?.kalshiResponse && (
             <details className="mt-3">
-              <summary className="text-xs text-zinc-700 cursor-pointer hover:text-zinc-500 transition select-none">
+              <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition select-none">
                 View order payload
               </summary>
-              <pre className="mt-2 text-xs text-zinc-600 bg-zinc-950 rounded-lg p-3 overflow-x-auto border border-zinc-800/60 font-mono leading-relaxed">
+              <pre className="mt-2 text-xs text-zinc-500 bg-zinc-950 rounded-lg p-3 overflow-x-auto border border-zinc-800/60 font-mono leading-relaxed">
                 {JSON.stringify(execution.kalshiResponse, null, 2)}
               </pre>
             </details>

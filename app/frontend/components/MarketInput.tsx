@@ -37,7 +37,6 @@ export default function MarketInput({ onAnalyze }: Props) {
     );
   };
 
-  const selected = SAMPLE_MARKETS.find((m) => m.ticker === ticker);
 
   return (
     <div className="flex flex-col gap-10 fade-in-up">
@@ -51,7 +50,7 @@ export default function MarketInput({ onAnalyze }: Props) {
           Signal<span className="text-teal-400">Forge</span>
         </h1>
         <p className="text-zinc-400 text-lg max-w-lg mx-auto leading-relaxed">
-          Research agents collect evidence, compress it, and execute trades on Kalshi — automatically.
+          Research agents collect evidence, compress it, and generate trading signals for Kalshi prediction markets.
         </p>
       </div>
 
