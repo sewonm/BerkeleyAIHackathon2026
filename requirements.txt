@@ -24,11 +24,8 @@ httpx>=0.27.0
 # Claude API (optional for advanced compression)
 anthropic>=0.18.0
 
-# Phase 3 Browserbase noisy layer (OPTIONAL — install with: pip install -e ".[scrape]")
-# The noisy collector degrades to disk cache / fixtures when these or
-# BROWSERBASE_API_KEY are absent, so the demo runs offline.
-# playwright>=1.44.0
-# browserbase>=1.0.0
+# Redis — shared agent memory and caching
+redis>=5.0.5
 
 # Note: For the MVP standalone app, uagents is not required.
 # For Agentverse deployment, install with: pip install -r requirements.txt
