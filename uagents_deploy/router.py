@@ -10,8 +10,8 @@ Design contract (mirrors sports_evidence.py):
   `import uagents_deploy.router` succeeds with no key, no uAgents, no OpenAI SDK.
 
 Three-rung never-fail ladder:
-  Rung 1: LLM tier (_route_llm)       — stub in this plan; plan 02 implements it
-  Rung 2: Scored-keyword heuristic    — this plan's deliverable (_route_heuristic)
+  Rung 1: LLM tier (_route_llm)       — plan 02 implementation (CLASSIFY_SYSTEM_PROMPT + validate)
+  Rung 2: Scored-keyword heuristic    — plan 01 deliverable (_route_heuristic)
   Rung 3: Safe culture default        — last-resort (_route_default)
 """
 
@@ -54,6 +54,40 @@ CATEGORY_TO_AGENT: dict[str, Optional[str]] = {
 
 REJECT_FLOOR = 0.35   # below this confidence -> category="none"
 AUTO_FLOOR   = 0.65   # above this: action="auto_route" (Phase 4)
+
+# ---------------------------------------------------------------------------
+# LLM system prompt — classify + rewrite + extract in one call (PROMPT-01/02/04)
+# Copied VERBATIM from 02-RESEARCH.md Pattern 5 lines 408-435.
+# ---------------------------------------------------------------------------
+
+CLASSIFY_SYSTEM_PROMPT = """You are a prediction-market routing assistant.
+
+Given a natural-language betting question, return ONLY a JSON object with these fields:
+{
+  "category": "<one of: sports | financial | culture | politics | none>",
+  "confidence": <float 0.0–1.0>,
+  "rewritten_query": "<focused research query — see instructions below>",
+  "protected_terms": ["<verbatim entity 1>", "<verbatim entity 2>", ...],
+  "rationale": "<one sentence explaining why this category>"
+}
+
+CATEGORY RULES:
+- sports: games, matches, teams, players, leagues, tournaments, athletes
+- financial: stocks, crypto, indices, prices, rates, earnings, economic metrics
+- culture: movies, music, awards, celebrities, books, TV, pop-culture events
+- politics: elections, legislation, government, politicians, policy, ballots
+- none: off-topic, weather, geography, gibberish (confidence < 0.35)
+
+REWRITE RULES (strip "Will...?", odds framing, deadline framing; keep the answerable subject):
+- sports:    "<team/player> <event> <year> form injuries performance"
+- financial: "<ticker/asset> <metric> <threshold> <date> outlook"
+- culture:   "<entity> <event/award> <year> outcome"
+- politics:  "<office/measure> <jurisdiction> <date> outcome"
+
+PROTECTED TERMS: extract verbatim entities (teams, players, tickers, proper nouns,
+4-digit years). Every extracted term MUST appear in rewritten_query.
+
+IMPORTANT: Return ONLY the JSON object. No preamble, no explanation, no code fences."""
 
 # ---------------------------------------------------------------------------
 # RouterDecision dataclass
@@ -185,18 +219,76 @@ def route(question: str) -> RouterDecision:
 # ---------------------------------------------------------------------------
 
 def _route_llm(question: str) -> Optional[RouterDecision]:
-    """Rung 1 — LLM tier. Stub in plan 01; real impl in plan 02. Returns None -> falls to heuristic."""
-    return None
+    """
+    Rung 1 — LLM tier (plan 02 implementation).
+
+    Returns RouterDecision on success, None on ANY failure
+    (caller falls through to heuristic — SAFETY-01).
+
+    References `LLMService` by its MODULE-LEVEL name so tests can
+    patch("uagents_deploy.router.LLMService", return_value=mock_svc).
+    """
+    if LLMService is None:          # guarded import failed — no SDK installed
+        return None
+    svc = LLMService()
+    if not svc.available:           # no key -> skip; chat_json NOT called (SAFETY-01)
+        return None
+    result = svc.chat_json(CLASSIFY_SYSTEM_PROMPT, question)
+    if not result.ok:
+        logger.info("[router] LLM ok=False: %s", result.error)
+        return None
+    return _validate_and_build(result.data, question, tier="llm")
+
+
+def _validate_and_build(
+    data: dict,
+    original_question: str,
+    tier: str,
+) -> Optional[RouterDecision]:
+    """
+    Validate LLM output dict. Returns None on invalid category -> caller falls to heuristic.
+    Applies REJECT_FLOOR coercion and protected-term post-check (PROMPT-04).
+    """
+    category   = str(data.get("category", "")).lower().strip()
+    rewritten  = str(data.get("rewritten_query", "")).strip()
+    terms      = [str(t) for t in data.get("protected_terms", [])]
+    confidence = float(data.get("confidence", 0.0))
+    rationale  = str(data.get("rationale", "")).strip()
+
+    # Closed-enum guard — LLMs hallucinate "Crypto", "Sports" (capitalized), "economic"
+    if category not in VALID_CATEGORIES:
+        logger.warning("[router] LLM invalid category %r — demoting", category)
+        return None                     # -> heuristic
+
+    # OOD reject floor (ROUTE-03 on the LLM path)
+    if confidence < REJECT_FLOOR:
+        category = "none"
+
+    # Protected-term post-check (PROMPT-04): union LLM terms + 4-digit years from original
+    years_in_original = set(re.findall(r'\b(20\d{2})\b', original_question))
+    all_protected = set(terms) | years_in_original
+    if not _protected_term_postcheck(rewritten, all_protected):
+        logger.info("[router] post-check failed — forwarding raw question")
+        rewritten = original_question   # PROMPT-04: forward RAW, do NOT patch/retry
+
+    return RouterDecision(
+        category=category,
+        target_agent_key=CATEGORY_TO_AGENT.get(category),
+        rewritten_query=rewritten or original_question,
+        protected_terms=terms,
+        confidence=min(max(confidence, 0.0), 1.0),
+        rationale=rationale or f"LLM classified as {category}",
+        tier=tier,
+    )
 
 
 def _protected_term_postcheck(rewritten: str, terms: set) -> bool:
-    """Stub in plan 01; real impl (case-insensitive substring check) in plan 02."""
-    return True  # stub: always passes; plan 02 implements correctly
-
-
-def _validate_and_build(data: dict, original_question: str, tier: str) -> Optional[RouterDecision]:
-    """Stub in plan 01; real impl in plan 02. Returns None -> falls to heuristic."""
-    return None
+    """
+    Every protected term must appear (case-insensitive) in the rewritten query.
+    Returns True if all terms survive, False if any is missing (PROMPT-04).
+    """
+    rewritten_lower = rewritten.lower()
+    return all(term.lower() in rewritten_lower for term in terms)
 
 
 def _route_heuristic(question: str) -> RouterDecision:
