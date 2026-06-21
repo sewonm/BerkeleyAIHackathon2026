@@ -66,8 +66,8 @@ AGENT_METADATA = {
     },
     "financial_research_agent": {
         "name": "Financial Research Agent",
-        "description": "Collects evidence from financial and economic sources",
-        "status": "PLACEHOLDER",
+        "description": "Fetches live Kalshi market data (price, volume, orderbook) via RSA-signed API",
+        "status": "IMPLEMENTED",
         "port": 8006,
     },
     "market_agent": {
