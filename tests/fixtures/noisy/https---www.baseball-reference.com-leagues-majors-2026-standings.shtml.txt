@@ -1,0 +1,5 @@
+Baseball-Reference — 2026 MLB standings & team form (raw)
+AL East: Yankees 47-29 (.618), Orioles 44-32, Red Sox 41-35. NL West: Dodgers 50-26 (best record), Padres 43-33.
+Pythagorean W-L: Dodgers 51-25 (outperforming by ~1), Yankees 45-31 (underperforming by 2 — bullpen blown saves 11).
+Run differential: Dodgers +132, Yankees +88. Last 10: Dodgers 8-2, Yankees 5-5. Home/road splits: Yankees 27-11 home.
+Key: Dodgers rotation ERA 3.21 (1st), Yankees team OPS .764 (3rd). SOS remaining slightly tougher for Yankees.

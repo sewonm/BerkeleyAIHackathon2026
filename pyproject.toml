@@ -7,11 +7,13 @@ name = "kalshi-agent-compression"
 version = "0.1.0"
 description = "Multi-agent prediction market research with context compression"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
+    "uagents>=0.25.2",
+    "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +23,13 @@ test = [
 dev = [
     "pytest>=7.4.0",
     "tiktoken>=0.5.0",
+]
+# Phase 3 Browserbase noisy layer (Playwright-over-CDP). Optional: the noisy
+# collector degrades to disk cache / fixtures when these (or BROWSERBASE_API_KEY)
+# are absent, so the demo stays reliable offline.
+scrape = [
+    "playwright>=1.44.0",
+    "browserbase>=1.0.0",
 ]
 
 [tool.pytest.ini_options]
