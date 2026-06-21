@@ -23,7 +23,7 @@ KALSHI_BASE_URL = os.getenv(
     "https://external-api.demo.kalshi.co/trade-api/v2",
 )
 
-KALSHI_API_KEY = os.getenv("KALSHI_API_KEY")
+KALSHI_API_KEY = os.getenv("KALSHI_EXEC_API_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
 
 
