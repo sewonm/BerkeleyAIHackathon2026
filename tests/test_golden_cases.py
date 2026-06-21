@@ -100,3 +100,42 @@ GOLDEN_HEURISTIC_AMBIGUOUS = [
     ("09_congress_crypto_etf",  "Will Congress pass a crypto ETF bill this year?",  {"politics", "financial"}),
     ("10_world_cup_nike_stock", "Will the World Cup final affect Nike stock?",       {"sports", "financial"}),
 ]
+
+
+# ---------------------------------------------------------------------------
+# class TestGoldenHeuristic
+# ---------------------------------------------------------------------------
+
+class TestGoldenHeuristic:
+    """TEST-02 deterministic layer: 14 golden cases via _route_heuristic() directly.
+
+    Calls _route_heuristic() directly (NOT route()) to bypass the LLM ladder entirely.
+    This is the always-pass demo-safety floor — no LLM, no network, no key required.
+    Even when ASI1_API_KEY is set locally, calling _route_heuristic() proves the heuristic,
+    not the LLM (which is the point: we need to know the floor always holds).
+    """
+
+    @pytest.mark.parametrize("case_id,question,expected_cat,expected_key", GOLDEN_HEURISTIC)
+    def test_heuristic_golden_case(self, case_id, question, expected_cat, expected_key):
+        """Deterministic fallback layer: _route_heuristic() routes correctly, no LLM, no network."""
+        result = _route_heuristic(question)
+        assert result.category == expected_cat, (
+            f"[{case_id}] Expected category={expected_cat!r}, got {result.category!r} "
+            f"(confidence={result.confidence:.2f}, rationale={result.rationale!r})"
+        )
+        assert result.target_agent_key == expected_key, (
+            f"[{case_id}] Expected target_agent_key={expected_key!r}, got {result.target_agent_key!r}"
+        )
+        assert result.tier == "heuristic"
+        assert 0.0 <= result.confidence <= 1.0
+
+    @pytest.mark.parametrize("case_id,question,allowed_cats", GOLDEN_HEURISTIC_AMBIGUOUS)
+    def test_heuristic_ambiguous_case(self, case_id, question, allowed_cats):
+        """Ambiguous cases #9 and #10: assert membership in allowed set, not exact winner."""
+        result = _route_heuristic(question)
+        assert result.category in allowed_cats, (
+            f"[{case_id}] Expected category in {allowed_cats!r}, got {result.category!r} "
+            f"(confidence={result.confidence:.2f})"
+        )
+        assert result.tier == "heuristic"
+        assert result.confidence > 0.0
