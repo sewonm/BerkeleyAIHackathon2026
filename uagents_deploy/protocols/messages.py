@@ -38,6 +38,7 @@ class EvidenceRequest(BaseModel):
     msg_id: UUID = Field(default_factory=uuid4)
     timestamp: datetime = Field(default_factory=datetime.now)
     market_question: str
+    market_id: Optional[str] = None
     category: str
     protected_terms: List[str] = Field(default_factory=list)
 
