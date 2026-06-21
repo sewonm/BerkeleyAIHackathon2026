@@ -22,6 +22,8 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [agents, setAgents] = useState<BridgeAgent[]>([]);
   const [execution, setExecution] = useState<ExecutionResult | undefined>(undefined);
+  const [cacheHit, setCacheHit] = useState<boolean | undefined>(undefined);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number | undefined>(undefined);
 
   const handleAnalyze = (
     question: string,
@@ -37,6 +39,8 @@ export default function Home() {
     setResult(data.result);
     setAgents(data.agents);
     setExecution(data.execution);
+    setCacheHit(data.cacheHit);
+    setElapsedSeconds(data.elapsedSeconds);
     setStep("results");
   };
 
@@ -44,6 +48,8 @@ export default function Home() {
     setResult(null);
     setAgents([]);
     setExecution(undefined);
+    setCacheHit(undefined);
+    setElapsedSeconds(undefined);
     setStep("input");
   };
 
@@ -117,6 +123,8 @@ export default function Home() {
             execution={execution}
             question={market.question}
             ticker={market.ticker}
+            cacheHit={cacheHit}
+            elapsedSeconds={elapsedSeconds}
             onReset={handleReset}
           />
         )}

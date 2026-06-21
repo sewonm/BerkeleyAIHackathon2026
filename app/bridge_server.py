@@ -337,7 +337,10 @@ async def analyze(req: AnalyzeRequest):
     category = _route(req.question, req.category, req.ticker)
 
     # ── Step 2: Collect evidence ─────────────────────────────────────────────
-    per_agent = await _collect(category, req.question, req.ticker)
+    try:
+        per_agent = await asyncio.wait_for(_collect(category, req.question, req.ticker), timeout=10.0)
+    except asyncio.TimeoutError:
+        per_agent = {category: []}
 
     agents_out = []
     all_chunks: list[EvidenceChunk] = []
@@ -384,9 +387,28 @@ async def analyze(req: AnalyzeRequest):
     key_evidence = []
     for chunk in comp.kept_chunks[:4]:
         text = (chunk.get("text") if isinstance(chunk, dict) else getattr(chunk, "text", "")) or ""
-        first = text.splitlines()[0].strip() if text else ""
-        if first:
-            key_evidence.append(first[:160])
+        snippet = ""
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or len(line) < 35:
+                continue
+            # Skip chunk metadata
+            if line.startswith(("===", "URL:", "Query:", "http", "![", "---")):
+                continue
+            # Article headlines (# Headline) — strip the # and use if long enough
+            if line.startswith("#"):
+                headline = line.lstrip("#").strip()
+                if len(headline) > 30 and "](" not in headline:
+                    snippet = headline[:180]
+                    break
+                continue
+            # Skip nav links
+            if line.startswith(("[", "- [", "* [")) or ("](" in line and line.count("[") >= 1):
+                continue
+            snippet = line[:180]
+            break
+        if snippet:
+            key_evidence.append(snippet)
     if not key_evidence:
         key_evidence = ["No high-signal evidence extracted."]
 
@@ -497,6 +519,7 @@ async def analyze(req: AnalyzeRequest):
             "kalshiResponse":       execution.kalshi_response,
         },
         "elapsedSeconds": round(elapsed, 2),
+        "cacheHit": comp.cache_hit,
     }
 
 

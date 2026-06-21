@@ -9,6 +9,8 @@ interface Props {
   execution?: ExecutionResult;
   question: string;
   ticker: string;
+  cacheHit?: boolean;
+  elapsedSeconds?: number;
   onReset: () => void;
 }
 
@@ -43,7 +45,7 @@ function Section({ title, defaultOpen = true, children }: { title: string; defau
   );
 }
 
-export default function ResultsView({ result, agents = [], execution, question, ticker, onReset }: Props) {
+export default function ResultsView({ result, agents = [], execution, question, ticker, cacheHit, elapsedSeconds, onReset }: Props) {
   const rec = result.recommendation;
   const styles = REC_STYLES[rec];
   const totalChunks = agents.reduce((n, a) => n + a.chunks, 0);
@@ -112,6 +114,19 @@ export default function ResultsView({ result, agents = [], execution, question, 
 
       {/* Compression */}
       <Section title="Compression Pipeline">
+        {(cacheHit === true || cacheHit === false) && (
+          <div className="flex items-center gap-2 mt-2 mb-3">
+            {cacheHit === true ? (
+              <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-yellow-400/15 border border-yellow-400/30 text-yellow-300">
+                ⚡ Redis HIT{elapsedSeconds != null ? ` · ${Math.round(elapsedSeconds * 1000)}ms` : ""}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-500">
+                💾 Cached to Redis{elapsedSeconds != null ? ` · ${elapsedSeconds.toFixed(2)}s` : ""}
+              </span>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-4 py-2">
           <div>
             <p className="text-lg font-bold font-mono text-zinc-300">{result.rawTokens.toLocaleString()}</p>
@@ -252,13 +267,13 @@ export default function ResultsView({ result, agents = [], execution, question, 
           }`}>
             {execution?.approved ? "✓ Order simulated (demo)" : `✗ ${execution?.reason ?? "No order placed"}`}
           </div>
-          {execution?.kalshiResponse && (
+          {!!execution?.kalshiResponse && (
             <details className="mt-3">
               <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition select-none">
                 View order payload
               </summary>
-              <pre className="mt-2 text-xs text-zinc-500 bg-zinc-950 rounded-lg p-3 overflow-x-auto border border-zinc-800/60 font-mono leading-relaxed">
-                {JSON.stringify(execution.kalshiResponse, null, 2)}
+              <pre className="mt-2 text-xs text-zinc-600 bg-zinc-950 rounded-lg p-3 overflow-x-auto border border-zinc-800/60 font-mono leading-relaxed">
+                {JSON.stringify(execution.kalshiResponse as object, null, 2)}
               </pre>
             </details>
           )}

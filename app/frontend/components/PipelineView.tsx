@@ -53,6 +53,8 @@ export default function PipelineView({ question, ticker, yesPrice, category, onC
   const [rawTotal, setRawTotal] = useState(0);
   const [compressedTokens, setCompressedTokens] = useState(0);
   const [compressionRatio, setCompressionRatio] = useState(0);
+  const [cacheHit, setCacheHit] = useState<boolean | null>(null);
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const startedRef = useRef(false);
@@ -96,6 +98,8 @@ export default function PipelineView({ question, ticker, yesPrice, category, onC
         const ag = data.agents[0] ?? null;
         setDispatchedAgent(ag);
         setRawTotal(data.rawTokens);
+        setCacheHit(data.cacheHit ?? false);
+        setElapsedMs(data.elapsedSeconds != null ? Math.round(data.elapsedSeconds * 1000) : null);
         setPhase("compressing");
         setTimeout(() => {
           setCompressedTokens(data.compressedTokens);
@@ -201,6 +205,19 @@ export default function PipelineView({ question, ticker, yesPrice, category, onC
                   <p className={`text-xs leading-relaxed ${isActive ? "text-zinc-400" : isDone ? "text-zinc-600" : "text-zinc-700"}`}>
                     {step.sub}
                   </p>
+                  {step.id === "compressing" && isDone && cacheHit !== null && (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      {cacheHit === true ? (
+                        <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-yellow-400/15 border border-yellow-400/30 text-yellow-300">
+                          ⚡ Redis HIT{elapsedMs != null ? ` · ${elapsedMs}ms` : ""}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-500">
+                          💾 Cached{elapsedMs != null ? ` · ${(elapsedMs / 1000).toFixed(1)}s` : ""}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {isActive && (
                     <div className="mt-2 h-px bg-zinc-800 rounded overflow-hidden">
                       <div className="h-full bg-teal-500/40 rounded shimmer" style={{ width: "60%" }} />
