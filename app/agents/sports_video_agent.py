@@ -1,12 +1,18 @@
 """
-Sports live-stats evidence agent — SYNC core (Phase 1: stub bundle).
+Sports live-stats evidence agent — SYNC core.
 
 This module provides the sync SportsAgent used by the coordinator. It is the
 SYNC counterpart to the deployed uAgent (uagents_deploy/sports_video_agent.py).
 It does NOT import uagents; it is a plain BaseAgent subclass.
 
-Phase 1: Returns a hardcoded stub bundle (no network, no ESPN, no Browserbase).
-Phases 2-3 will replace stub with live ESPN data + Browserbase noisy layer.
+Phase 2 (this implementation): ``run()`` pulls live, deterministic data from the
+free ESPN HTTP JSON APIs for ANY sport (via the sport->source registry) and emits
+normalized ``EvidenceChunk``s. It falls back to a hardcoded stub bundle if ESPN is
+unreachable, so the coordinator contract (>= 2 chunks) always holds and the demo
+survives offline. Set ``SPORTS_AGENT_OFFLINE=1`` to force the stub path.
+
+Phase 3 adds the Browserbase noisy layer; Phase 4 merges anchor + noisy into one
+query-aware bundle.
 
 Seed helper (SA-AGENT-01 groundwork):
     The deployed uAgent's stable identity seed lives here so there is ONE place
@@ -43,16 +49,21 @@ def get_sports_agent_seed() -> str:
 # Sync core agent
 # ---------------------------------------------------------------------------
 
+def _offline() -> bool:
+    """True when the stub path is forced via ``SPORTS_AGENT_OFFLINE``."""
+    return os.getenv("SPORTS_AGENT_OFFLINE", "").strip().lower() in {"1", "true", "yes"}
+
+
 class SportsAgent(BaseAgent):
     """
     Gathers raw sports evidence from live stats sources.
 
-    Phase 1 (this implementation): Returns a hardcoded stub bundle of >= 2
-    ``EvidenceChunk`` objects so the coordinator pipeline works end-to-end
-    before real data sources are wired up.
-
-    Phase 2 will replace ``_build_stub_bundle`` with live ESPN API calls.
-    Phase 3 will add the Browserbase noisy layer on top.
+    Phase 2 (this implementation): ``run()`` resolves the sport/league + game from
+    the registry and pulls live ESPN HTTP data (score/state, box stats, event log,
+    odds with line movement, win/implied probability, injuries, lineups), each
+    normalized to an ``EvidenceChunk``. If ESPN is unreachable (or
+    ``SPORTS_AGENT_OFFLINE`` is set) it returns a hardcoded stub bundle so the
+    pipeline never breaks.
 
     Constructible with NO args (the coordinator calls ``SportsVideoAgent()``).
     ``run()`` is SYNCHRONOUS — no async, no uagents imports here.
@@ -61,30 +72,50 @@ class SportsAgent(BaseAgent):
     def __init__(self) -> None:
         super().__init__(
             name="SportsAgent",
-            description="Gathers raw sports evidence (Phase 1: stub bundle)",
+            description="Gathers raw sports evidence (ESPN HTTP anchor)",
         )
 
     def run(self, market: Market) -> List[EvidenceChunk]:
-        """Return a hardcoded stub bundle of sports evidence chunks.
+        """Collect sports evidence for a market — live ESPN, stub fallback.
 
         Args:
-            market: The prediction market to research.  The market title is
-                    lightly woven into stub text so the bundle looks
-                    market-aware, but it works for ANY market.
+            market: The prediction market to research. Its sport/league + game
+                    are resolved from the registry (no hardcoded sport).
 
         Returns:
             List of >= 2 ``EvidenceChunk`` objects with
             ``source_type="sports_video"`` and the four standardised metadata
-            keys ``kind``, ``fetched_via``, ``source_strength``, ``observed_at``.
+            keys ``kind``, ``fetched_via``, ``source_strength``, ``observed_at``
+            (live chunks add ``sport``, ``league``, ``event_id``).
         """
         observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         title = market.title or "the market"
+
+        if not _offline():
+            chunks = self._collect_live(market, observed_at)
+            if len(chunks) >= 2:
+                return chunks
 
         return self._build_stub_bundle(title=title, observed_at=observed_at)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _collect_live(market: Market, observed_at: str) -> List[EvidenceChunk]:
+        """Pull the merged sports bundle (ESPN anchor + Browserbase noisy).
+
+        Never raises — returns [] on failure. Lazy import keeps the agent
+        importable even if the data layer or its deps are missing (the
+        coordinator depends on this module).
+        """
+        try:
+            from app.services.sports_collector import collect_sports_evidence
+
+            return collect_sports_evidence(market, observed_at=observed_at)
+        except Exception:
+            return []
 
     @staticmethod
     def _build_stub_bundle(title: str, observed_at: str) -> List[EvidenceChunk]:

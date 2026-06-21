@@ -67,13 +67,26 @@ async def on_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
     )
 
 
+def _extract_bundle_json(text: str):
+    """The reply is a human-readable summary + a fenced ```json bundle block.
+
+    Extract and parse that block; fall back to parsing the whole message as JSON
+    (older pure-JSON reply format).
+    """
+    if "```json" in text:
+        body = text.split("```json", 1)[1].split("```", 1)[0].strip()
+        return json.loads(body)
+    return json.loads(text)
+
+
 @client.on_message(ChatMessage)
 async def on_reply(ctx: Context, sender: str, msg: ChatMessage):
     """This is the bundle reply from sports_video_agent."""
     ctx.logger.info(f"[test_client] GOT BUNDLE REPLY from {sender}")
+    ctx.logger.info("[test_client] --- reply preview ---\n" + msg.text()[:400])
 
     try:
-        chunks = json.loads(msg.text())
+        chunks = _extract_bundle_json(msg.text())
     except Exception as exc:
         ctx.logger.error(f"[test_client] Failed to parse bundle JSON: {exc}")
         os._exit(1)

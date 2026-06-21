@@ -43,6 +43,10 @@ ENV/
 htmlcov/
 .tox/
 
+# Runtime scrape/HTTP cache (Phase 2 ESPN + Phase 3 Browserbase).
+# tests/fixtures/** is the committed, deterministic data — do NOT ignore that.
+.cache/
+
 # Outputs (keep the directory but not the files)
 examples/outputs/*.json
 examples/outputs/*.txt

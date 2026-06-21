@@ -53,8 +53,8 @@ AGENT_METADATA = {
         "port": 8000,
     },
     "sports_video_agent": {
-        "name": "Sports Video Evidence Agent",
-        "description": "Returns a stub sports EvidenceChunk bundle (Phase 1)",
+        "name": "Quorum Sports Evidence Agent",
+        "description": "Live sport-agnostic evidence bundle (ESPN anchor + Browserbase noisy) for a Kalshi sports market",
         "status": "IMPLEMENTED",
         "port": 8004,
     },

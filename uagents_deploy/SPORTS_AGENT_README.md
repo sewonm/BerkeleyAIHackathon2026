@@ -4,7 +4,12 @@
 ![tag:hackathon](https://img.shields.io/badge/hackathon-5F43F1)
 ![domain:sports](https://img.shields.io/badge/sports-32CD32)
 
-Gathers wide raw sports evidence for a Kalshi market and returns it as an EvidenceChunk bundle (Phase 1: stub bundle).
+Given a Kalshi **sports** market question, this agent resolves the sport/league and the live (or most-recent) game, then returns a wide **raw evidence bundle** as `EvidenceChunk`s — ready for a downstream compression engine.
+
+**Sport-agnostic** (NBA/NFL/MLB/soccer/…) via a sport→source registry; showcased on the **2026 FIFA World Cup** and **MLB**. Each evidence bundle blends:
+
+- **Live ESPN HTTP anchor** — score/state, box/match stats, event log, betting **odds with open/close/current line movement**, win/implied probability, injuries, lineups.
+- **Browserbase noisy layer** — raw scraped text from deep-stats + match-thread sources (FBref/Sofascore/Reddit).
 
 ## Agent Address
 
@@ -36,43 +41,63 @@ The agent also accepts a custom `EvidenceRequest` message (for orchestrator-to-a
 
 ### Output
 
-1. **Acknowledgement:** A `ChatAcknowledgement` sent immediately on receipt.
-2. **Bundle reply:** A `ChatMessage` whose text is a JSON array of `EvidenceChunkMsg` objects.
+1. **Acknowledgement:** A `ChatAcknowledgement` sent immediately on receipt (ack-first; the blocking fetch runs off the event loop).
+2. **Bundle reply:** A `ChatMessage` with a human-readable evidence summary **plus** a fenced ` ```json ` block containing the full `EvidenceChunkMsg` array.
 
 Each chunk in the bundle has the following shape:
 
 ```json
 {
   "source_type": "sports_video",
-  "text": "<evidence text>",
-  "source_url": "stub://sports/phase1",
-  "confidence": 0.5,
+  "text": "<raw evidence text>",
+  "source_url": "https://site.api.espn.com/...",
+  "confidence": 0.9,
   "metadata": {
-    "kind": "scoreline | injury | ...",
-    "fetched_via": "stub",
-    "source_strength": "stub",
-    "observed_at": "2026-06-21T00:00:00Z"
+    "kind": "score_state | box_stats | event_log | odds | win_probability | injuries | lineups | deep_stats | match_thread",
+    "fetched_via": "http | browserbase",
+    "source_strength": "anchor | noisy",
+    "observed_at": "2026-06-20T00:00:00Z",
+    "sport": "soccer",
+    "league": "fifa.world",
+    "event_id": "760447"
   }
 }
 ```
 
-The bundle always contains at least 2 chunks.
+The bundle always contains at least 2 chunks. If live data is unavailable it falls back to recorded fixtures, then to a tiny stub — so a reply is never empty.
+
+### Example questions
+
+- `Will Argentina win the 2026 FIFA World Cup?`  → soccer/fifa.world
+- `Will the Yankees win this MLB game?`          → baseball/mlb
+- `Will the Lakers cover the spread tonight?`     → basketball/nba (config-only)
+
+## Run / deploy (mailbox)
+
+```bash
+# from the repo root
+python uagents_deploy/sports_video_agent.py
+# open the printed Agent Inspector link -> Connect -> Mailbox -> Finish
+# (registers it on Agentverse + ASI:One; the address above stays stable)
+```
+
+Local round-trip check (two terminals):
+
+```bash
+python uagents_deploy/sports_video_agent.py      # terminal A
+python uagents_deploy/send_test_chat.py          # terminal B -> GOT ACK + GOT BUNDLE REPLY
+```
 
 ## Try it from ASI:One
 
 1. Go to [https://asi1.ai](https://asi1.ai) and search for this agent by name (`sports_video_agent`) or address.
-2. Start a conversation and send a question like: "Will Argentina beat Brazil in the World Cup?"
-3. You will receive an ack, followed by a JSON bundle of `EvidenceChunkMsg` entries.
+2. Send a question like: "Will Argentina beat Brazil in the World Cup?"
+3. You receive an ack, then a readable evidence summary + the full JSON bundle.
 
 ## Architecture Notes
 
-- **Dual-protocol:** exposes both Chat Protocol v0.3.0 (for ASI:One / human chat) and a custom `SportsVideoEvidence` protocol (for `orchestrator_agent.py` machine-to-machine calls).
-- **Fixed seed / stable address:** the `agent1q…` address above never changes as long as the seed constant is unchanged (SA-AGENT-01).
-- **Mailbox agent:** runs with `mailbox=True` and `publish_agent_details=True`; deploy by running it and connecting via the Agent Inspector link (Connect → Mailbox), which registers it on Agentverse for asynchronous reachability + discovery.
-- **Self-contained:** uses only `uagents`, `uagents_core`, stdlib, and `protocols.messages` — no internal app-package imports, so it runs anywhere.
-
-## Phase 1 Stub Notice
-
-Phase 1 returns canned stub evidence; live ESPN + Browserbase data land in later phases.
-
-The stub bundle is returned deterministically regardless of the market question. The schema (including all four metadata keys) is final — later phases replace only the data-fetching internals.
+- **Dual-protocol:** Chat Protocol v0.3.0 (ASI:One / human chat) + a custom `SportsVideoEvidence` protocol (orchestrator machine-to-machine).
+- **Fixed seed / stable address:** the `agent1q…` address above never changes while the seed constant is unchanged (SA-AGENT-01).
+- **Mailbox agent:** runs locally with `mailbox=True` + `publish_agent_details=True`; deploy via the Agent Inspector (Connect → Mailbox). Because it runs locally it imports the project's live collectors (`app.services.*`) for real data.
+- **Ack-first + non-blocking:** acknowledges immediately, then runs the blocking HTTP/scrape off the event loop via `asyncio.to_thread` with a timeout (SA-INT-01/02).
+- **Demo-safe:** live → recorded fixtures → stub, so a reply is never empty even with the network off.

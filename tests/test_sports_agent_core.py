@@ -15,6 +15,17 @@ import pytest
 from app.schemas.market import Market
 
 
+@pytest.fixture(autouse=True)
+def _force_offline(monkeypatch):
+    """Pin the SYNC-core contract tests to the deterministic stub path.
+
+    Phase 2 made ``run()`` hit live ESPN by default; these tests assert the stub
+    fallback contract, so we force it. The live ESPN path is covered offline (via
+    fixtures) in ``test_espn_collector.py``.
+    """
+    monkeypatch.setenv("SPORTS_AGENT_OFFLINE", "1")
+
+
 @pytest.fixture
 def sports_market():
     """A typical sports market for testing."""
