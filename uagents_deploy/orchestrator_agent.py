@@ -48,6 +48,15 @@ from protocols.messages import (
     AgentStatus
 )
 
+# Graph-compressor wire schema — byte-identical to graph_compression_agent.py's models
+# (verified by schema-digest parity). The orchestrator speaks THIS to the graph compressor;
+# the graph agent code is left untouched.
+from protocols.graph_compression_messages import (
+    CompressionRequest as GraphCompressionRequest,
+    CompressionResponse as GraphCompressionResponse,
+    EvidenceChunk as GraphEvidenceChunk,
+)
+
 # ASI:One chat protocol support (optional, gracefully degrades if unavailable)
 try:
     from uagents_core.contrib.protocols.chat import (
@@ -353,14 +362,34 @@ async def handle_evidence_response(ctx: Context, sender: str, msg: EvidenceRespo
     # Check if we have all evidence we're waiting for
     # For MVP, we only request from one agent, so proceed immediately
     compression_agent_addr = AGENT_ADDRESSES.get("compression")
+    # compression_agent_addr = None
     if compression_agent_addr:
         # Step 2: compress evidence -> (later) decision -> confirmation (full pipeline)
-        ctx.logger.info(f"[{AGENT_NAME}] Step 2: Compressing evidence")
-        compression_request = CompressionRequest(
-            market_question=state.market_request.market_question,
-            protected_terms=list(state.market_request.protected_terms),
-            evidence_chunks=state.all_evidence_chunks,
+        ctx.logger.info(f"[{AGENT_NAME}] Step 2: Compressing evidence (graph compressor schema)")
+        # Map the shared EvidenceChunkMsg list onto the graph compressor's EvidenceChunk
+        # schema. request_id = pipeline state key, which the graph agent echoes back on its
+        # CompressionResponse so it correlates to this pipeline.
+        mr = state.market_request
+        graph_chunks = [
+            GraphEvidenceChunk(
+                chunk_id=str((c.metadata or {}).get("chunk_id") or f"{c.source_type}-{i}"),
+                market_id=mr.market_id,
+                source_agent=str((c.metadata or {}).get("agent") or c.source_type),
+                source_type=c.source_type,
+                text=c.text,
+                timestamp=c.timestamp,
+                metadata=(c.metadata or {}),
+            )
+            for i, c in enumerate(state.all_evidence_chunks)
+        ]
+        compression_request = GraphCompressionRequest(
+            request_id=str(state.request_id),
+            market_id=mr.market_id,
+            market_question=mr.market_question,
+            resolution_criteria=mr.resolution_criteria or "",
+            evidence_chunks=graph_chunks,
             token_budget=3000,
+            output_format="text",
         )
         await ctx.send(compression_agent_addr, compression_request)
     else:
@@ -380,20 +409,24 @@ async def handle_evidence_response(ctx: Context, sender: str, msg: EvidenceRespo
         analysis_state.pop(request_id, None)   # guard: no stale state -> no hang
 
 
-@orchestration_protocol.on_message(model=CompressionResponse)
-async def handle_compression_response(ctx: Context, sender: str, msg: CompressionResponse):
+@orchestration_protocol.on_message(model=GraphCompressionResponse)
+async def handle_compression_response(ctx: Context, sender: str, msg: GraphCompressionResponse):
     """
-    Handle compression response.
+    Handle the graph compressor's CompressionResponse (graph schema).
+
+    Maps the graph output (compressed_output + metrics dict) onto the shared DecisionRequest
+    that the decision agent expects — the decision agent stays on the shared schema.
 
     Args:
         ctx: Agent context
         sender: Address of compression agent
-        msg: Compression response message
+        msg: Graph compression response message
     """
-    ctx.logger.info(f"[{AGENT_NAME}] Received compression result")
-    ctx.logger.info(f"Compression ratio: {msg.compression_ratio:.2f}x")
+    metrics = msg.metrics or {}
+    ctx.logger.info(f"[{AGENT_NAME}] Received compression result (status={msg.status})")
+    ctx.logger.info(f"Compression ratio: {metrics.get('compression_ratio', 0)}x")
 
-    # Find state
+    # Find state — the graph agent echoes our request_id back
     request_id = str(msg.request_id)
     state = analysis_state.get(request_id)
 
@@ -401,17 +434,21 @@ async def handle_compression_response(ctx: Context, sender: str, msg: Compressio
         ctx.logger.warning(f"[{AGENT_NAME}] No state found for request {request_id}")
         return
 
+    if msg.status != "success":
+        ctx.logger.warning(f"[{AGENT_NAME}] Compression reported failure: {msg.error}")
+
     state.compression_response = msg
 
-    # Step 3: Send to decision agent
+    # Step 3: Send to decision agent (shared DecisionRequest schema — decision agent unchanged)
     ctx.logger.info(f"[{AGENT_NAME}] Step 3: Making decision")
 
+    mr = state.market_request
     decision_request = DecisionRequest(
-        market_title="Market Title",  # Would use actual market data
-        market_question="Market Question",
-        current_yes_price=0.5,
-        compressed_context=msg.compressed_context,
-        kept_chunks_count=msg.kept_chunks_count
+        market_title=mr.market_title,
+        market_question=mr.market_question,
+        current_yes_price=mr.current_yes_price,
+        compressed_context=msg.compressed_output,
+        kept_chunks_count=int(metrics.get("final_sources", 0)),
     )
 
     decision_agent_addr = AGENT_ADDRESSES.get("decision")
@@ -465,6 +502,10 @@ async def handle_decision_response(ctx: Context, sender: str, msg: DecisionRespo
             if msg.missing_info:
                 missing_info_text = f"\n\n**Missing Information:**\n" + "\n".join([f"• {m}" for m in msg.missing_info[:3]])
 
+            # Compression ratio now lives in the graph response's metrics dict
+            comp_metrics = getattr(state.compression_response, "metrics", {}) or {}
+            comp_ratio = comp_metrics.get("compression_ratio", 0.0)
+
             decision_text = f"""📊 **Trading Decision Analysis Complete**
 
 **Question:** {state.market_request.market_question}
@@ -483,7 +524,7 @@ async def handle_decision_response(ctx: Context, sender: str, msg: DecisionRespo
 **Analysis Metrics:**
 • Agents used: {', '.join(state.agents_used)}
 • Processing time: {processing_time:.1f}s
-• Evidence compressed: {state.compression_response.compression_ratio:.1f}x ratio
+• Evidence compressed: {comp_ratio:.1f}x ratio
 
 ---
 
