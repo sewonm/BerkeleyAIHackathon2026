@@ -33,24 +33,36 @@ from protocols.messages import (
 
 # ASI:One chat protocol support (optional, gracefully degrades if unavailable)
 try:
-    from uagents.chat import (
+    from uagents_core.contrib.protocols.chat import (
         chat_protocol_spec,
         ChatMessage,
         TextContent,
         EndSessionContent,
-        ChatAcknowledgement
+        ChatAcknowledgement,
     )
     CHAT_PROTOCOL_AVAILABLE = True
 except ImportError:
     print("[Warning] Chat protocol not available - ASI:One integration disabled")
-    print("Install with: pip install uagents[chat]")
     CHAT_PROTOCOL_AVAILABLE = False
+
+# Router import (Phase 2 deliverable — guarded so a missing router never crashes the agent)
+try:
+    from router import route as router_route, _route_heuristic, CATEGORY_TO_AGENT
+    ROUTER_AVAILABLE = True
+except Exception as _router_err:   # never crash the agent if router import fails
+    ROUTER_AVAILABLE = False
+    router_route = None
+    _route_heuristic = None
+    CATEGORY_TO_AGENT = {}
 
 # Agent configuration
 AGENT_NAME = "orchestrator_agent"
 AGENT_SEED = "orchestrator_agent_seed_phrase_change_in_production"
 AGENT_PORT = 8000
 AGENT_MAILBOX = True
+
+# Tunable LLM router timeout (seconds). Degrades to instant heuristic on expiry (SAFETY-03).
+ROUTER_TIMEOUT = float(os.getenv("ROUTER_TIMEOUT", "8.0"))
 
 # Create the agent
 agent = Agent(
@@ -64,8 +76,10 @@ agent = Agent(
 orchestration_protocol = Protocol("MarketOrchestration")
 
 # Protocol for ASI:One/DeltaV interaction (if available)
+# Use spec= only (no explicit name) — matches sports_video_agent.py pattern and avoids
+# "spec name overrides given name" warning + Protocol.verify() failure.
 if CHAT_PROTOCOL_AVAILABLE:
-    chat_protocol = Protocol("Chat", spec=chat_protocol_spec)
+    chat_protocol = Protocol(spec=chat_protocol_spec)
 
 # Agent addresses — set these as env vars on Agentverse or in local .env
 AGENT_ADDRESSES = {
@@ -97,6 +111,46 @@ class PipelineState:
         self.agents_used: List[str] = []
         self.requester_address: Optional[str] = None
         self.pending_agents: int = 0  # how many evidence agents we're waiting on
+
+
+# ============================================================================
+# EXTRACTED SYNC HELPERS — module-scope, importable + unit-testable without
+# constructing a uAgent (uagents_deploy/ on sys.path is sufficient).
+# These contain all the testable logic; the async handler stays thin.
+# ============================================================================
+
+def _heuristic_fallback(user_text: str):
+    """Instant, no-network fallback used on router timeout/error (SAFETY-03).
+    Delegates to the imported _route_heuristic; never touches the network."""
+    return _route_heuristic(user_text)
+
+
+def _build_market_request_from_decision(user_text: str, decision) -> MarketRequest:
+    """DISPATCH-01: map RouterDecision onto the existing MarketRequest fields — no protocol change.
+      decision.rewritten_query -> market_question
+      decision.category        -> category
+      decision.protected_terms -> protected_terms
+    """
+    from uuid import uuid4 as _uuid4
+    return MarketRequest(
+        market_id=f"chat-{_uuid4()}",
+        market_title=user_text[:100],
+        market_question=decision.rewritten_query,       # rewritten_query -> market_question
+        category=decision.category,                     # category -> category
+        protected_terms=list(decision.protected_terms), # protected_terms -> protected_terms
+        resolution_criteria="To be determined by evidence analysis",
+        current_yes_price=0.5,
+        current_no_price=0.5,
+    )
+
+
+def _format_routing_note(decision) -> str:
+    """DISPATCH-04: user-visible note naming the chosen category, tier, confidence, rationale."""
+    return (
+        f"Routing to: {decision.category} agent "
+        f"(via {decision.tier}, {decision.confidence:.0%} confidence)\n"
+        f"Rationale: {decision.rationale}"
+    )
 
 
 @orchestration_protocol.on_message(model=MarketRequest)
@@ -391,8 +445,8 @@ if CHAT_PROTOCOL_AVAILABLE:
         ctx.logger.info(f"[{AGENT_NAME}] Received chat message from {sender}")
 
         try:
-            # Send acknowledgement
-            await ctx.send(sender, ChatAcknowledgement())
+            # Send acknowledgement FIRST — required by Chat Protocol spec (SAFETY-03 ordering)
+            await ctx.send(sender, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
 
             # Extract text from message content
             user_text = ""
@@ -521,30 +575,37 @@ Try asking me a prediction market question!
                 await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
                 return
 
-            # Process natural language question
-            ctx.logger.info(f"[{AGENT_NAME}] Processing natural language question")
+            # Process natural language question via Phase 2 router (SAFETY-03)
+            ctx.logger.info(f"[{AGENT_NAME}] Processing natural language question via router")
 
-            # Auto-detect category
-            category = detect_category(user_text)
-            ctx.logger.info(f"[{AGENT_NAME}] Category detected: {category}")
+            # Call route() OFF the event loop with a timeout; heuristic fallback on any error.
+            # ACK is already sent above — do NOT reorder (SAFETY-03 ordering).
+            try:
+                decision = await asyncio.wait_for(
+                    asyncio.to_thread(router_route, user_text),
+                    timeout=ROUTER_TIMEOUT,
+                )
+                ctx.logger.info(
+                    "[%s] route tier=%s category=%s conf=%.2f",
+                    AGENT_NAME, decision.tier, decision.category, decision.confidence,
+                )
+            except Exception as exc:   # asyncio.TimeoutError is a subclass — caught here
+                ctx.logger.warning(
+                    "[%s] router error/timeout (%s) — heuristic fallback",
+                    AGENT_NAME, type(exc).__name__,
+                )
+                decision = _heuristic_fallback(user_text)
 
-            # Send initial processing notification
+            # Send routing note to user (DISPATCH-04): rationale + tier are both visible
+            routing_note = _format_routing_note(decision)
             await ctx.send(sender, ChatMessage(
-                content=[TextContent(text=f"🔍 **Analyzing your question**\n\nQuestion: {user_text}\nCategory: {category}\n\nGathering evidence from specialized agents...")]
+                content=[TextContent(
+                    text=f"🔍 **Analyzing your question**\n\nQuestion: {user_text}\n\n{routing_note}\n\nGathering evidence from specialized agents..."
+                )]
             ))
 
-            # Create a MarketRequest from the natural language question
-            from uuid import uuid4
-            market_request = MarketRequest(
-                market_id=f"chat-{uuid4()}",
-                market_title=user_text[:100],  # Use question as title
-                market_question=user_text,
-                category=category,
-                resolution_criteria="To be determined by evidence analysis",
-                protected_terms=[],  # Will be extracted by agents
-                current_yes_price=0.5,  # Default middle price
-                current_no_price=0.5,
-            )
+            # DISPATCH-01: map RouterDecision onto existing MarketRequest fields (no protocol change)
+            market_request = _build_market_request_from_decision(user_text, decision)
 
             # Process through the pipeline by calling the existing handler
             # We'll use the request_id to track this for the user
@@ -566,6 +627,13 @@ Try asking me a prediction market question!
 
             # End session
             await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+
+    @chat_protocol.on_message(model=ChatAcknowledgement)
+    async def handle_chat_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
+        """Handle ACK receipts from users (required for protocol spec verification)."""
+        ctx.logger.info(
+            "[%s] ACK from %s for msg %s", AGENT_NAME, sender, msg.acknowledged_msg_id
+        )
 
 
 # ============================================================================
@@ -592,6 +660,14 @@ async def startup(ctx: Context):
         ctx.logger.info("ASI:One chat protocol: ENABLED (DeltaV compatible)")
     else:
         ctx.logger.info("ASI:One chat protocol: DISABLED (install uagents[chat])")
+
+    # LLM availability log (SAFETY-03 no-leak: log presence/absence string, NEVER the key value)
+    llm_enabled = bool(os.getenv("ASI1_API_KEY", "").strip())
+    ctx.logger.info(
+        "[%s] LLM %s", AGENT_NAME,
+        "ENABLED (ASI1_API_KEY present)" if llm_enabled
+        else "DISABLED (no ASI1_API_KEY — heuristic tier only)",
+    )
 
     # TODO: In production, these would be loaded from environment or discovery
     ctx.logger.info("Note: Configure agent addresses via environment variables or Agentverse discovery")
