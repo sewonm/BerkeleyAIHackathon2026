@@ -392,17 +392,14 @@ async def analyze(req: AnalyzeRequest):
             line = line.strip()
             if not line or len(line) < 35:
                 continue
-            # Skip chunk metadata
             if line.startswith(("===", "URL:", "Query:", "http", "![", "---")):
                 continue
-            # Article headlines (# Headline) — strip the # and use if long enough
             if line.startswith("#"):
                 headline = line.lstrip("#").strip()
                 if len(headline) > 30 and "](" not in headline:
                     snippet = headline[:180]
                     break
                 continue
-            # Skip nav links
             if line.startswith(("[", "- [", "* [")) or ("](" in line and line.count("[") >= 1):
                 continue
             snippet = line[:180]

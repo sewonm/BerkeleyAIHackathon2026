@@ -85,12 +85,19 @@ class DecisionAgent:
         if rec not in ("YES", "NO", "HOLD"):
             rec = "HOLD"
 
+        raw_evidence = data.get("key_evidence", [])
+        key_evidence = [
+            e for e in raw_evidence
+            if not e.strip().startswith(("===", "URL:", "Query:", "---", "http"))
+            and len(e.strip()) > 20
+        ]
+
         return Decision(
             recommendation=rec,
             confidence=round(float(data.get("confidence", 0.6)), 2),
             fair_probability=round(float(data.get("fair_probability", market.current_yes_price)), 2),
             reasoning=data.get("reasoning", ""),
-            key_evidence=data.get("key_evidence", []),
+            key_evidence=key_evidence or ["No high-signal evidence extracted."],
             missing_info=data.get("missing_info", []),
         )
 
@@ -115,9 +122,25 @@ class DecisionAgent:
         key_evidence = []
         for chunk in kept_chunks[:5]:
             text = chunk.get("text", "") if isinstance(chunk, dict) else getattr(chunk, "text", "")
-            if len(text) > 100:
-                text = text[:97] + "..."
-            key_evidence.append(text)
+            snippet = ""
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or len(line) < 35:
+                    continue
+                if line.startswith(("===", "URL:", "Query:", "http", "![", "---")):
+                    continue
+                if line.startswith("#"):
+                    headline = line.lstrip("#").strip()
+                    if len(headline) > 30 and "](" not in headline:
+                        snippet = headline[:180]
+                        break
+                    continue
+                if line.startswith(("[", "- [", "* [")) or ("](" in line and line.count("[") >= 1):
+                    continue
+                snippet = line[:180]
+                break
+            if snippet:
+                key_evidence.append(snippet)
 
         if strength >= 3 and pos >= 5:
             rec, conf, fair = "YES", min(0.75 + strength * 0.03, 0.90), min(0.55 + strength * 0.02, 0.75)
