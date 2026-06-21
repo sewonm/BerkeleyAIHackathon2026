@@ -1,0 +1,195 @@
+{
+  "description": "Redis data contract for SignalForge. All agents read/write these exact keys. Do not invent new key patterns.",
+  "key_schema": {
+    "market:{market_id}:snapshot": {
+      "writer": "market_agent",
+      "readers": ["decision_agent", "frontend"],
+      "type": "JSON string",
+      "example": {
+        "market_id": "kalshi_bra_mex_wc2026",
+        "question": "Will Brazil beat Mexico in the 2026 FIFA World Cup?",
+        "yes_price": 0.61,
+        "no_price": 0.39,
+        "implied_probability": 0.61,
+        "volume": 48200,
+        "liquidity": "high",
+        "recent_movement": "YES moved from 0.55 to 0.61 in last 12 hours",
+        "timestamp": "2026-06-22T20:00:00Z"
+      }
+    },
+    "market:{market_id}:claims": {
+      "writer": "web_agent, video_agent, stats_agent (all append — never overwrite)",
+      "readers": ["compression_agent"],
+      "type": "JSON array string",
+      "example": [
+        {
+          "claim_id": "claim_001",
+          "claim": "Mexico's Lozano seen receiving physio treatment on right calf during warmups.",
+          "source_type": "video",
+          "source_name": "pregame warmup clip",
+          "supports": "yes",
+          "confidence": 0.78,
+          "market_relevance": 0.91,
+          "recency": "high",
+          "raw_evidence": "Frame at 40s: Lozano jogging at reduced pace, physio on right calf",
+          "raw_tokens": 340,
+          "compressed_tokens": 42,
+          "timestamp": "2026-06-22T19:45:00Z"
+        },
+        {
+          "claim_id": "claim_002",
+          "claim": "Brazil have won all 4 World Cup meetings against Mexico.",
+          "source_type": "stats",
+          "source_name": "Opta Stats Feed",
+          "supports": "yes",
+          "confidence": 0.99,
+          "market_relevance": 0.85,
+          "recency": "low",
+          "raw_evidence": "H2H World Cup record: W4 D0 L0",
+          "raw_tokens": 180,
+          "compressed_tokens": 22,
+          "timestamp": "2026-06-22T19:45:00Z"
+        }
+      ]
+    },
+    "market:{market_id}:compressed": {
+      "writer": "compression_agent",
+      "readers": ["decision_agent", "frontend"],
+      "type": "JSON string",
+      "example": {
+        "market_id": "kalshi_bra_mex_wc2026",
+        "raw_token_count": 34400,
+        "compressed_token_count": 3820,
+        "compression_ratio": "9.01x",
+        "token_reduction_pct": 88.9,
+        "top_claims": [
+          "Mexico's Lozano doubtful — physio treatment observed in video warmup.",
+          "Brazil have won all 4 World Cup meetings vs Mexico (W4 D0 L0).",
+          "Market YES price moved from 0.55 to 0.61 in 12 hours.",
+          "xG model gives Brazil 63% win probability for this fixture."
+        ],
+        "uncertainties": [
+          "Lozano injury status may be resolved before kickoff — monitor official lineup.",
+          "Video evidence is warmup footage, not in-game."
+        ],
+        "timestamp": "2026-06-22T19:50:00Z"
+      }
+    },
+    "market:{market_id}:decision": {
+      "writer": "decision_agent",
+      "readers": ["frontend", "risk_manager"],
+      "type": "JSON string",
+      "example": {
+        "market_id": "kalshi_bra_mex_wc2026",
+        "estimated_probability": 0.69,
+        "market_probability": 0.61,
+        "edge": 0.08,
+        "recommendation": "YES",
+        "confidence": "medium-high",
+        "reasoning": [
+          "Video confirms Lozano receiving physio treatment — injury risk unpriced.",
+          "Brazil's historical dominance vs Mexico in World Cup (W4/4).",
+          "xG model and form data both favor Brazil."
+        ],
+        "risks": [
+          "Injury status may change before kickoff.",
+          "Mexico's defensive block can limit Brazil's attack."
+        ],
+        "disclaimer": "Simulated research tool. Not financial advice.",
+        "timestamp": "2026-06-22T19:51:00Z"
+      }
+    },
+    "game:{game_id}:state": {
+      "writer": "game_data_feed",
+      "readers": ["frontend", "market_agent"],
+      "type": "JSON string",
+      "example": {
+        "game_id": "fifa_bra_mex_wc2026_0622",
+        "sport": "soccer",
+        "home_team": "Brazil",
+        "away_team": "Mexico",
+        "minute": 34,
+        "score": { "Brazil": 1, "Mexico": 0 },
+        "status": "in_progress",
+        "last_updated": "2026-06-22T20:35:00Z"
+      }
+    },
+    "game:{game_id}:stats:{entity_id}": {
+      "writer": "game_data_feed / stats_agent",
+      "readers": ["stats_agent", "compression_agent"],
+      "type": "JSON string",
+      "example": {
+        "entity_id": "vinicius_jr",
+        "entity_type": "player",
+        "team": "Brazil",
+        "goals": 1,
+        "assists": 0,
+        "shots": 4,
+        "shots_on_target": 2,
+        "minutes_played": 34,
+        "injury_status": "active",
+        "last_updated": "2026-06-22T20:35:00Z"
+      }
+    },
+    "stream:game:{game_id}:events": {
+      "writer": "game_data_feed",
+      "readers": ["frontend", "market_agent"],
+      "type": "Redis Stream",
+      "example_event": {
+        "event_type": "goal",
+        "team": "Brazil",
+        "player": "Vinicius Jr",
+        "minute": 34,
+        "description": "Vinicius Jr scores — Brazil 1-0 Mexico",
+        "market_impact": "supports_yes",
+        "timestamp": "2026-06-22T20:35:10Z"
+      }
+    },
+    "user:{user_id}:portfolio": {
+      "writer": "paper_trading_engine",
+      "readers": ["frontend"],
+      "type": "JSON string",
+      "example": {
+        "user_id": "demo_user",
+        "paper_cash": 9460.0,
+        "positions": [
+          {
+            "market_id": "kalshi_bra_mex_wc2026",
+            "side": "YES",
+            "quantity": 20,
+            "avg_price": 0.61,
+            "current_price": 0.69,
+            "unrealized_pnl": 160.0
+          }
+        ],
+        "total_pnl": 160.0,
+        "timestamp": "2026-06-22T19:52:00Z"
+      }
+    },
+    "leaderboard:paper_trading": {
+      "writer": "paper_trading_engine",
+      "readers": ["frontend"],
+      "type": "Redis Sorted Set (member=user_id, score=PnL)",
+      "example": {
+        "vepaul": 999.9,
+        "adam": 420.5,
+        "sewon": 310.2,
+        "derek": 180.7
+      }
+    }
+  },
+  "mvp_priority": [
+    "market:{market_id}:snapshot",
+    "market:{market_id}:claims",
+    "market:{market_id}:compressed",
+    "market:{market_id}:decision",
+    "stream:game:{game_id}:events"
+  ],
+  "rules": [
+    "Never store all data under one giant key. Use the schema above.",
+    "claims key is append-only — multiple agents write to it, never overwrite.",
+    "All values are JSON strings except the leaderboard (sorted set) and event stream (Redis Stream).",
+    "Always include a timestamp field in every object.",
+    "market_id must match across all 4 market keys for a given analysis run."
+  ]
+}
