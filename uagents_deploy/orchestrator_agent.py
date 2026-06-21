@@ -13,6 +13,7 @@ Deployable to Agentverse as the public-facing interface.
 
 import asyncio
 import json
+import os
 from datetime import datetime
 from typing import Dict, List, Optional
 from uagents import Agent, Context, Protocol
@@ -46,12 +47,12 @@ agent = Agent(
 # Create protocol
 orchestration_protocol = Protocol("MarketOrchestration")
 
-# Agent addresses - These would be published on Agentverse
-# For local testing, we'll discover them dynamically
+# Agent addresses — set these as env vars on Agentverse or in local .env
 AGENT_ADDRESSES = {
-    "culture_web": None,  # Will be set via environment or discovery
-    "compression": None,
-    "decision": None,
+    "culture_web": os.getenv("CULTURE_WEB_AGENT_ADDRESS"),
+    "financial_research": os.getenv("FINANCIAL_RESEARCH_AGENT_ADDRESS"),
+    "compression": os.getenv("COMPRESSION_AGENT_ADDRESS"),
+    "decision": os.getenv("DECISION_AGENT_ADDRESS"),
 }
 
 # State storage for async coordination
@@ -60,8 +61,9 @@ analysis_state: Dict[str, dict] = {}
 
 class PipelineState:
     """Track the state of a market analysis pipeline"""
-    def __init__(self, request_id: str):
+    def __init__(self, request_id: str, market_request: "MarketRequest"):
         self.request_id = request_id
+        self.market_request = market_request
         self.start_time = datetime.now()
         self.evidence_responses: List[EvidenceResponse] = []
         self.compression_response: Optional[CompressionResponse] = None
@@ -69,6 +71,7 @@ class PipelineState:
         self.all_evidence_chunks: List[EvidenceChunkMsg] = []
         self.agents_used: List[str] = []
         self.requester_address: Optional[str] = None
+        self.pending_agents: int = 0  # how many evidence agents we're waiting on
 
 
 @orchestration_protocol.on_message(model=MarketRequest)
@@ -93,7 +96,7 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
     ctx.logger.info(f"Category: {msg.category}")
 
     # Initialize pipeline state
-    state = PipelineState(request_id=str(msg.msg_id))
+    state = PipelineState(request_id=str(msg.msg_id), market_request=msg)
     state.requester_address = sender
     analysis_state[str(msg.msg_id)] = state
 
@@ -104,26 +107,30 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
         message=f"Starting analysis pipeline for: {msg.market_title}"
     ))
 
-    # Step 1: Request evidence from agents
+    # Step 1: Fan out evidence requests to all available agents
     ctx.logger.info(f"[{AGENT_NAME}] Step 1: Requesting evidence from agents")
 
     evidence_request = EvidenceRequest(
         market_question=msg.market_question,
+        market_id=msg.market_id,
         category=msg.category,
-        protected_terms=msg.protected_terms
+        protected_terms=msg.protected_terms,
     )
 
-    # For MVP, only send to culture_web_agent
-    # In production, send to multiple agents based on category
-    if msg.category == "culture" or True:  # For MVP, always use culture agent
-        culture_agent_addr = AGENT_ADDRESSES.get("culture_web")
+    dispatch = [
+        ("culture_web", "culture_web_agent"),
+        ("financial_research", "financial_research_agent"),
+    ]
 
-        if culture_agent_addr:
-            ctx.logger.info(f"[{AGENT_NAME}] Requesting evidence from culture_web_agent")
-            await ctx.send(culture_agent_addr, evidence_request)
-            state.agents_used.append("culture_web_agent")
+    for addr_key, agent_label in dispatch:
+        addr = AGENT_ADDRESSES.get(addr_key)
+        if addr:
+            ctx.logger.info(f"[{AGENT_NAME}] Requesting evidence from {agent_label}")
+            await ctx.send(addr, evidence_request)
+            state.agents_used.append(agent_label)
+            state.pending_agents += 1
         else:
-            ctx.logger.warning(f"[{AGENT_NAME}] Culture web agent address not configured")
+            ctx.logger.warning(f"[{AGENT_NAME}] {agent_label} address not configured — skipping")
 
             # For local MVP, simulate evidence response
             ctx.logger.info(f"[{AGENT_NAME}] Using fallback local evidence collection")
