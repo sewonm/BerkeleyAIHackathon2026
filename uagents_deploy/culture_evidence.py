@@ -84,6 +84,8 @@ async def _serper_search(query: str, max_results: int) -> list[dict]:
     ]
 
 
+_IMAGE_EXTS = ('.ico', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp')
+
 async def _bb_ddg_search(query: str, max_results: int) -> list[dict]:
     """Fetch DuckDuckGo HTML results via Browserbase — no bot blocking."""
     search_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
@@ -91,9 +93,28 @@ async def _bb_ddg_search(query: str, max_results: int) -> list[dict]:
         content = await _bb_fetch(search_url)
     except Exception:
         return []
-    # Exclude DuckDuckGo's own domain from the harvested links.
-    links = re.findall(r'\[([^\]]+)\]\((https?://(?!(?:www\.)?duckduckgo\.)[^\)]+)\)', content)
-    return [{"url": url, "title": title, "snippet": "", "provider": "browserbase"} for title, url in links[:max_results]]
+    all_links = re.findall(r'\[([^\]]*)\]\((https?://[^\)]+)\)', content)
+    results = []
+    for title, url in all_links:
+        # Skip favicon/image links and DDG icon proxy
+        if title.strip().startswith('!') or 'external-content.duckduckgo.com' in url:
+            continue
+        if any(url.lower().endswith(ext) for ext in _IMAGE_EXTS):
+            continue
+        # Decode DDG redirect links (/l/?uddg=...)
+        if '/l/?' in url and 'uddg=' in url:
+            m = re.search(r'uddg=([^&]+)', url)
+            if m:
+                url = urllib.parse.unquote(m.group(1))
+            else:
+                continue
+        # Skip remaining DDG internal links
+        if 'duckduckgo.com' in url:
+            continue
+        results.append({"url": url, "title": title.strip(), "snippet": "", "provider": "browserbase"})
+        if len(results) >= max_results:
+            break
+    return results
 
 
 async def search_web(query: str, max_results: int = 5) -> list[dict]:
@@ -179,7 +200,7 @@ async def collect_bundle(question: str, category: str = "culture", protected_ter
     async def _search_one(template, kind):
         query = template.format(q=question or "")
         try:
-            results = await asyncio.wait_for(search_web(query, max_results=2), timeout=12.0)
+            results = await asyncio.wait_for(search_web(query, max_results=2), timeout=5.0)
         except Exception:
             results = []
         return query, kind, results
@@ -205,7 +226,7 @@ async def collect_bundle(question: str, category: str = "culture", protected_ter
         content = snippet
         if url and not url.startswith("stub://"):
             try:
-                fetched = await asyncio.wait_for(fetch_as_markdown(url), timeout=8.0)
+                fetched = await asyncio.wait_for(fetch_as_markdown(url), timeout=3.0)
                 if fetched.strip():
                     content = fetched[:2000]
             except Exception:
