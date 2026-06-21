@@ -81,16 +81,32 @@ AGENT_SEED = os.getenv("ORCHESTRATOR_AGENT_SEED", "quorum-orchestrator-agent-see
 AGENT_PORT = 8000
 AGENT_MAILBOX = True
 
+# Profile published to Agentverse/ASI:One so the router can match plain-language
+# market questions to this agent (intent discovery). publish_agent_details=True
+# publishes name/description/README; marketplace tags come from the README badges.
+AGENT_DESCRIPTION = (
+    "Quorum Orchestrator — the front door for prediction-market questions. Routes a "
+    "messy natural-language market question (sports / financial / culture / politics) "
+    "to the right specialized research agent and returns the routing decision plus the "
+    "collected evidence analysis."
+)
+README_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ORCHESTRATOR_README.md")
+
 # Tunable LLM router timeout (seconds). Degrades to instant heuristic on expiry (SAFETY-03).
 ROUTER_TIMEOUT = float(os.getenv("ROUTER_TIMEOUT", "8.0"))
 
 # Create the agent
-agent = Agent(
+_agent_kwargs = dict(
     name=AGENT_NAME,
     seed=AGENT_SEED,
     port=AGENT_PORT,
     mailbox=AGENT_MAILBOX,
+    description=AGENT_DESCRIPTION,
+    publish_agent_details=True,  # publish profile + README -> discoverable on Agentverse/ASI:One
 )
+if os.path.exists(README_PATH):
+    _agent_kwargs["readme_path"] = README_PATH
+agent = Agent(**_agent_kwargs)
 
 # Create protocol for agent-to-agent communication
 orchestration_protocol = Protocol("MarketOrchestration")
