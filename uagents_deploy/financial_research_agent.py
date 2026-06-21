@@ -283,6 +283,13 @@ async def handle_evidence_request(ctx: Context, sender: str, msg: EvidenceReques
         await ctx.send(sender, AgentStatus(agent_name=AGENT_NAME, status="error", message=str(e)))
         return
 
+    try:
+        from redis_service import append_claims
+        append_claims(market_id, [c.model_dump() for c in chunks])
+        ctx.logger.info(f"[{AGENT_NAME}] Wrote {len(chunks)} claims to Redis")
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] Redis write skipped: {e}")
+
     await ctx.send(sender, EvidenceResponse(
         request_id=msg.msg_id,
         agent_name=AGENT_NAME,

@@ -71,6 +71,13 @@ async def handle_compression_request(ctx: Context, sender: str, msg: EnhancedCom
         # Run compression
         result = compressor.compress(msg)
 
+        try:
+            from redis_service import set_compressed
+            set_compressed(msg.market_id, result.model_dump())
+            ctx.logger.info(f"[{AGENT_NAME}] Cached compressed result to Redis")
+        except Exception as re:
+            ctx.logger.warning(f"[{AGENT_NAME}] Redis write skipped: {re}")
+
         # Send response
         response = EnhancedCompressionResponse(
             request_id=msg.request_id,
