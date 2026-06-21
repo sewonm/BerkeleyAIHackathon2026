@@ -153,6 +153,16 @@ def _format_routing_note(decision) -> str:
     )
 
 
+def _resolve_dispatch(category: str):
+    """DISPATCH-02/03: resolve a routed category to (target_key, address).
+    Returns (None, None) when the category has no wired agent (politics/none),
+    or (target_key, None) when the key exists but its address env var is unset."""
+    target_key = CATEGORY_TO_AGENT.get(category)   # None for politics/none
+    if target_key is None:
+        return None, None
+    return target_key, AGENT_ADDRESSES.get(target_key)
+
+
 @orchestration_protocol.on_message(model=MarketRequest)
 async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
     """
@@ -186,9 +196,11 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
         message=f"Starting analysis pipeline for: {msg.market_title}"
     ))
 
-    # Step 1: Fan out evidence requests to all available agents
-    ctx.logger.info(f"[{AGENT_NAME}] Step 1: Requesting evidence from agents")
+    # Step 1: Dispatch evidence request to the single chosen agent (DISPATCH-02)
+    ctx.logger.info(f"[{AGENT_NAME}] Step 1: Requesting evidence from chosen agent")
 
+    # Build the EvidenceRequest from the already-router-mapped MarketRequest fields
+    # (DISPATCH-01 done in plan 01 — no protocol change here)
     evidence_request = EvidenceRequest(
         market_question=msg.market_question,
         market_id=msg.market_id,
@@ -196,25 +208,27 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
         protected_terms=msg.protected_terms,
     )
 
-    dispatch = [
-        ("culture_web", "culture_web_agent"),
-        ("financial_research", "financial_research_agent"),
-        ("sports_video", "sports_video_agent"),
-    ]
+    target_key, addr = _resolve_dispatch(msg.category)
 
-    for addr_key, agent_label in dispatch:
-        addr = AGENT_ADDRESSES.get(addr_key)
-        if addr:
-            ctx.logger.info(f"[{AGENT_NAME}] Requesting evidence from {agent_label}")
-            await ctx.send(addr, evidence_request)
-            state.agents_used.append(agent_label)
-            state.pending_agents += 1
-        else:
-            ctx.logger.warning(f"[{AGENT_NAME}] {agent_label} address not configured — skipping")
+    if target_key is None or not addr:
+        # DISPATCH-03 — unwired category (politics/none) OR unset address: clean handoff, no hang
+        handoff_text = (
+            f"Routed to {msg.category}"
+            + (f" ({target_key})" if target_key else "")
+            + " — no live agent wired yet for this category."
+        )
+        ctx.logger.info("[%s] %s — clean handoff (no wired agent)", AGENT_NAME, handoff_text)
+        if state.requester_address and CHAT_PROTOCOL_AVAILABLE:
+            await ctx.send(state.requester_address, ChatMessage(content=[TextContent(text=handoff_text)]))
+            await ctx.send(state.requester_address, ChatMessage(content=[EndSessionContent()]))
+        analysis_state.pop(str(msg.msg_id), None)   # guard: no stale state -> no pending_agents==0 hang
+        return
 
-            # For local MVP, simulate evidence response
-            ctx.logger.info(f"[{AGENT_NAME}] Using fallback local evidence collection")
-            # This would be handled by receiving EvidenceResponse messages
+    # DISPATCH-02 — single-agent dispatch (exactly one send, not three)
+    ctx.logger.info("[%s] Dispatching to single agent: %s", AGENT_NAME, target_key)
+    await ctx.send(addr, evidence_request)
+    state.agents_used.append(target_key)
+    state.pending_agents = 1
 
 
 @orchestration_protocol.on_message(model=EvidenceResponse)

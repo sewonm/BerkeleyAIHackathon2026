@@ -42,7 +42,9 @@ import orchestrator_agent as ORCH  # noqa: E402
 from uagents_deploy.router import RouterDecision  # noqa: E402
 
 # Message types for plan 02 dispatch / handoff tests.
-from uagents_deploy.protocols.messages import MarketRequest, EvidenceRequest  # noqa: E402
+# Use the bare-path import (same as orchestrator_agent.py) so isinstance checks
+# compare against the identical class object. DEPLOY_DIR is already on sys.path above.
+from protocols.messages import MarketRequest, EvidenceRequest  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
