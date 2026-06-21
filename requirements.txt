@@ -20,8 +20,11 @@ uagents>=0.12.0
 # Claude API (optional for advanced compression)
 anthropic>=0.18.0
 
-# Redis — shared agent memory and caching
+# Redis — shared agent memory and vector search
 redis>=5.0.5
+
+# Semantic embeddings for Redis vector search in ConsensusClusterer
+sentence-transformers>=2.7.0
 
 # Note: For the MVP standalone app, uagents is not required.
 # For Agentverse deployment, install with: pip install -r requirements.txt
