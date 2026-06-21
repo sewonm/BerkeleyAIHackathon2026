@@ -14,9 +14,26 @@ Deployable to Agentverse as the public-facing interface.
 import asyncio
 import json
 import os
+import sys
 import traceback
 from datetime import datetime
 from typing import Dict, List, Optional
+
+# Load .env into the process environment for LOCAL / mailbox runs.
+# The app reads all config via os.getenv; without this, keys sitting in .env
+# (ASI1_API_KEY, agent addresses) are invisible — routing silently falls back to
+# the heuristic tier and the startup log prints "LLM DISABLED".
+# Skipped under pytest: importing this module must not leak real .env secrets into
+# the test process (tests assert keyless/heuristic behavior with a clean env).
+# Guarded so a missing python-dotenv (e.g. an Agentverse-hosted runtime) never
+# crashes import.
+if "pytest" not in sys.modules:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()  # walks up from this file to repo-root .env; no-op if absent
+    except ImportError:
+        pass
+
 from uagents import Agent, Context, Protocol
 from protocols.messages import (
     MarketRequest,
@@ -33,39 +50,72 @@ from protocols.messages import (
 
 # ASI:One chat protocol support (optional, gracefully degrades if unavailable)
 try:
-    from uagents.chat import (
+    from uagents_core.contrib.protocols.chat import (
         chat_protocol_spec,
         ChatMessage,
         TextContent,
         EndSessionContent,
-        ChatAcknowledgement
+        ChatAcknowledgement,
     )
     CHAT_PROTOCOL_AVAILABLE = True
 except ImportError:
     print("[Warning] Chat protocol not available - ASI:One integration disabled")
-    print("Install with: pip install uagents[chat]")
     CHAT_PROTOCOL_AVAILABLE = False
+
+# Router import (Phase 2 deliverable — guarded so a missing router never crashes the agent)
+try:
+    from router import route as router_route, _route_heuristic, CATEGORY_TO_AGENT
+    ROUTER_AVAILABLE = True
+except Exception as _router_err:   # never crash the agent if router import fails
+    ROUTER_AVAILABLE = False
+    router_route = None
+    _route_heuristic = None
+    CATEGORY_TO_AGENT = {}
 
 # Agent configuration
 AGENT_NAME = "orchestrator_agent"
-AGENT_SEED = "orchestrator_agent_seed_phrase_change_in_production"
+# Address is derived from AGENT_SEED — keep this seed constant + UNIQUE (a shared
+# placeholder collides on Agentverse: "seed phrase already used by another user").
+# Real value lives in .env (gitignored); the default is only a local fallback.
+AGENT_SEED = os.getenv("ORCHESTRATOR_AGENT_SEED", "quorum-orchestrator-agent-seed-v1")
 AGENT_PORT = 8000
 AGENT_MAILBOX = True
 
+# Profile published to Agentverse/ASI:One so the router can match plain-language
+# market questions to this agent (intent discovery). publish_agent_details=True
+# publishes name/description/README; marketplace tags come from the README badges.
+AGENT_DESCRIPTION = (
+    "Quorum Orchestrator — the front door for prediction-market questions. Routes a "
+    "messy natural-language market question (sports / financial / culture / politics) "
+    "to the right specialized research agent and returns the routing decision plus the "
+    "collected evidence analysis."
+)
+README_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ORCHESTRATOR_README.md")
+
+# Tunable LLM router timeout (seconds). Degrades to instant heuristic on expiry (SAFETY-03).
+ROUTER_TIMEOUT = float(os.getenv("ROUTER_TIMEOUT", "8.0"))
+
 # Create the agent
-agent = Agent(
+_agent_kwargs = dict(
     name=AGENT_NAME,
     seed=AGENT_SEED,
     port=AGENT_PORT,
     mailbox=AGENT_MAILBOX,
+    description=AGENT_DESCRIPTION,
+    publish_agent_details=True,  # publish profile + README -> discoverable on Agentverse/ASI:One
 )
+if os.path.exists(README_PATH):
+    _agent_kwargs["readme_path"] = README_PATH
+agent = Agent(**_agent_kwargs)
 
 # Create protocol for agent-to-agent communication
 orchestration_protocol = Protocol("MarketOrchestration")
 
 # Protocol for ASI:One/DeltaV interaction (if available)
+# Use spec= only (no explicit name) — matches sports_video_agent.py pattern and avoids
+# "spec name overrides given name" warning + Protocol.verify() failure.
 if CHAT_PROTOCOL_AVAILABLE:
-    chat_protocol = Protocol("Chat", spec=chat_protocol_spec)
+    chat_protocol = Protocol(spec=chat_protocol_spec)
 
 # Agent addresses — set these as env vars on Agentverse or in local .env
 AGENT_ADDRESSES = {
@@ -97,6 +147,90 @@ class PipelineState:
         self.agents_used: List[str] = []
         self.requester_address: Optional[str] = None
         self.pending_agents: int = 0  # how many evidence agents we're waiting on
+
+
+# ============================================================================
+# EXTRACTED SYNC HELPERS — module-scope, importable + unit-testable without
+# constructing a uAgent (uagents_deploy/ on sys.path is sufficient).
+# These contain all the testable logic; the async handler stays thin.
+# ============================================================================
+
+def _heuristic_fallback(user_text: str):
+    """Instant, no-network fallback used on router timeout/error (SAFETY-03).
+    Delegates to the imported _route_heuristic; never touches the network."""
+    return _route_heuristic(user_text)
+
+
+def _build_market_request_from_decision(user_text: str, decision) -> MarketRequest:
+    """DISPATCH-01: map RouterDecision onto the existing MarketRequest fields — no protocol change.
+      decision.rewritten_query -> market_question
+      decision.category        -> category
+      decision.protected_terms -> protected_terms
+    """
+    from uuid import uuid4 as _uuid4
+    return MarketRequest(
+        market_id=f"chat-{_uuid4()}",
+        market_title=user_text[:100],
+        market_question=decision.rewritten_query,       # rewritten_query -> market_question
+        category=decision.category,                     # category -> category
+        protected_terms=list(decision.protected_terms), # protected_terms -> protected_terms
+        resolution_criteria="To be determined by evidence analysis",
+        current_yes_price=0.5,
+        current_no_price=0.5,
+    )
+
+
+def _format_routing_note(decision) -> str:
+    """DISPATCH-04: user-visible note naming the chosen category, tier, confidence, rationale."""
+    return (
+        f"Routing to: {decision.category} agent "
+        f"(via {decision.tier}, {decision.confidence:.0%} confidence)\n"
+        f"Rationale: {decision.rationale}"
+    )
+
+
+def _format_evidence_digest(state, max_chunks: int = 8, snippet_len: int = 240) -> str:
+    """DEMO FALLBACK: render collected evidence chunks into a readable chat reply for the
+    user when the downstream compression/decision agents are not wired. Category-agnostic —
+    works for any evidence agent. Remove once the full pipeline is connected."""
+    chunks = state.all_evidence_chunks
+    mr = state.market_request
+    agents = ", ".join(state.agents_used) or "evidence agent"
+
+    # Count chunks by source strength (anchor/noisy/...) falling back to source_type.
+    by_strength: dict[str, int] = {}
+    for c in chunks:
+        key = (c.metadata or {}).get("source_strength") or c.source_type
+        by_strength[key] = by_strength.get(key, 0) + 1
+    breakdown = " / ".join(f"{n} {k}" for k, n in by_strength.items()) or "0"
+
+    lines = [
+        f"📊 **Evidence collected for:** {mr.market_question}",
+        f"**Category:** {mr.category} · **Agent(s):** {agents} · "
+        f"**{len(chunks)} chunk(s)** ({breakdown})",
+        "_Downstream compression/decision agents aren't wired yet — showing the raw evidence digest._",
+        "",
+        "**Top evidence:**",
+    ]
+    for c in chunks[:max_chunks]:
+        kind = (c.metadata or {}).get("kind") or c.source_type
+        text = " ".join((c.text or "").split())
+        if len(text) > snippet_len:
+            text = text[:snippet_len].rstrip() + "…"
+        lines.append(f"• [{kind}] {text}")
+    if len(chunks) > max_chunks:
+        lines.append(f"…and {len(chunks) - max_chunks} more chunk(s).")
+    return "\n".join(lines)
+
+
+def _resolve_dispatch(category: str):
+    """DISPATCH-02/03: resolve a routed category to (target_key, address).
+    Returns (None, None) when the category has no wired agent (politics/none),
+    or (target_key, None) when the key exists but its address env var is unset."""
+    target_key = CATEGORY_TO_AGENT.get(category)   # None for politics/none
+    if target_key is None:
+        return None, None
+    return target_key, AGENT_ADDRESSES.get(target_key)
 
 
 @orchestration_protocol.on_message(model=MarketRequest)
@@ -155,35 +289,40 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
         message=f"Starting analysis pipeline for: {msg.market_title}"
     ))
 
-    # Step 1: Fan out evidence requests to all available agents
-    ctx.logger.info(f"[{AGENT_NAME}] Step 1: Requesting evidence from agents")
+    # Step 1: Dispatch evidence request to the single chosen agent (DISPATCH-02)
+    ctx.logger.info(f"[{AGENT_NAME}] Step 1: Requesting evidence from chosen agent")
 
+    # Build the EvidenceRequest from the already-router-mapped MarketRequest fields
+    # (DISPATCH-01 done in plan 01 — no protocol change here)
     evidence_request = EvidenceRequest(
+        msg_id=msg.msg_id,   # reuse MarketRequest id so EvidenceResponse.request_id correlates to pipeline state
         market_question=msg.market_question,
         market_id=msg.market_id,
         category=msg.category,
         protected_terms=msg.protected_terms,
     )
 
-    dispatch = [
-        ("culture_web", "culture_web_agent"),
-        ("financial_research", "financial_research_agent"),
-        ("sports_video", "sports_video_agent"),
-    ]
+    target_key, addr = _resolve_dispatch(msg.category)
 
-    for addr_key, agent_label in dispatch:
-        addr = AGENT_ADDRESSES.get(addr_key)
-        if addr:
-            ctx.logger.info(f"[{AGENT_NAME}] Requesting evidence from {agent_label}")
-            await ctx.send(addr, evidence_request)
-            state.agents_used.append(agent_label)
-            state.pending_agents += 1
-        else:
-            ctx.logger.warning(f"[{AGENT_NAME}] {agent_label} address not configured — skipping")
+    if target_key is None or not addr:
+        # DISPATCH-03 — unwired category (politics/none) OR unset address: clean handoff, no hang
+        handoff_text = (
+            f"Routed to {msg.category}"
+            + (f" ({target_key})" if target_key else "")
+            + " — no live agent wired yet for this category."
+        )
+        ctx.logger.info("[%s] %s — clean handoff (no wired agent)", AGENT_NAME, handoff_text)
+        if state.requester_address and CHAT_PROTOCOL_AVAILABLE:
+            await ctx.send(state.requester_address, ChatMessage(content=[TextContent(text=handoff_text)]))
+            await ctx.send(state.requester_address, ChatMessage(content=[EndSessionContent()]))
+        analysis_state.pop(str(msg.msg_id), None)   # guard: no stale state -> no pending_agents==0 hang
+        return
 
-            # For local MVP, simulate evidence response
-            ctx.logger.info(f"[{AGENT_NAME}] Using fallback local evidence collection")
-            # This would be handled by receiving EvidenceResponse messages
+    # DISPATCH-02 — single-agent dispatch (exactly one send, not three)
+    ctx.logger.info("[%s] Dispatching to single agent: %s", AGENT_NAME, target_key)
+    await ctx.send(addr, evidence_request)
+    state.agents_used.append(target_key)
+    state.pending_agents = 1
 
 
 @orchestration_protocol.on_message(model=EvidenceResponse)
@@ -213,21 +352,32 @@ async def handle_evidence_response(ctx: Context, sender: str, msg: EvidenceRespo
 
     # Check if we have all evidence we're waiting for
     # For MVP, we only request from one agent, so proceed immediately
-    ctx.logger.info(f"[{AGENT_NAME}] Step 2: Compressing evidence")
-
-    # Send evidence to compression agent
-    compression_request = CompressionRequest(
-        market_question="Market analysis",  # Would use actual market question
-        protected_terms=[],  # Would use actual protected terms
-        evidence_chunks=state.all_evidence_chunks,
-        token_budget=3000
-    )
-
     compression_agent_addr = AGENT_ADDRESSES.get("compression")
     if compression_agent_addr:
+        # Step 2: compress evidence -> (later) decision -> confirmation (full pipeline)
+        ctx.logger.info(f"[{AGENT_NAME}] Step 2: Compressing evidence")
+        compression_request = CompressionRequest(
+            market_question=state.market_request.market_question,
+            protected_terms=list(state.market_request.protected_terms),
+            evidence_chunks=state.all_evidence_chunks,
+            token_budget=3000,
+        )
         await ctx.send(compression_agent_addr, compression_request)
     else:
-        ctx.logger.warning(f"[{AGENT_NAME}] Compression agent address not configured")
+        # DEMO FALLBACK (compression/decision agents unwired): don't go silent —
+        # return the collected evidence digest to the user and end the session,
+        # mirroring the DISPATCH-03 clean-handoff pattern. Remove once compression
+        # + decision are wired.
+        ctx.logger.warning(
+            "[%s] Compression agent not configured — returning evidence digest to user (fallback)",
+            AGENT_NAME,
+        )
+        if state.requester_address and CHAT_PROTOCOL_AVAILABLE:
+            await ctx.send(state.requester_address, ChatMessage(
+                content=[TextContent(text=_format_evidence_digest(state))]
+            ))
+            await ctx.send(state.requester_address, ChatMessage(content=[EndSessionContent()]))
+        analysis_state.pop(request_id, None)   # guard: no stale state -> no hang
 
 
 @orchestration_protocol.on_message(model=CompressionResponse)
@@ -414,8 +564,8 @@ if CHAT_PROTOCOL_AVAILABLE:
         ctx.logger.info(f"[{AGENT_NAME}] Received chat message from {sender}")
 
         try:
-            # Send acknowledgement
-            await ctx.send(sender, ChatAcknowledgement())
+            # Send acknowledgement FIRST — required by Chat Protocol spec (SAFETY-03 ordering)
+            await ctx.send(sender, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
 
             # Extract text from message content
             user_text = ""
@@ -544,30 +694,37 @@ Try asking me a prediction market question!
                 await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
                 return
 
-            # Process natural language question
-            ctx.logger.info(f"[{AGENT_NAME}] Processing natural language question")
+            # Process natural language question via Phase 2 router (SAFETY-03)
+            ctx.logger.info(f"[{AGENT_NAME}] Processing natural language question via router")
 
-            # Auto-detect category
-            category = detect_category(user_text)
-            ctx.logger.info(f"[{AGENT_NAME}] Category detected: {category}")
+            # Call route() OFF the event loop with a timeout; heuristic fallback on any error.
+            # ACK is already sent above — do NOT reorder (SAFETY-03 ordering).
+            try:
+                decision = await asyncio.wait_for(
+                    asyncio.to_thread(router_route, user_text),
+                    timeout=ROUTER_TIMEOUT,
+                )
+                ctx.logger.info(
+                    "[%s] route tier=%s category=%s conf=%.2f",
+                    AGENT_NAME, decision.tier, decision.category, decision.confidence,
+                )
+            except Exception as exc:   # asyncio.TimeoutError is a subclass — caught here
+                ctx.logger.warning(
+                    "[%s] router error/timeout (%s) — heuristic fallback",
+                    AGENT_NAME, type(exc).__name__,
+                )
+                decision = _heuristic_fallback(user_text)
 
-            # Send initial processing notification
+            # Send routing note to user (DISPATCH-04): rationale + tier are both visible
+            routing_note = _format_routing_note(decision)
             await ctx.send(sender, ChatMessage(
-                content=[TextContent(text=f"🔍 **Analyzing your question**\n\nQuestion: {user_text}\nCategory: {category}\n\nGathering evidence from specialized agents...")]
+                content=[TextContent(
+                    text=f"🔍 **Analyzing your question**\n\nQuestion: {user_text}\n\n{routing_note}\n\nGathering evidence from specialized agents..."
+                )]
             ))
 
-            # Create a MarketRequest from the natural language question
-            from uuid import uuid4
-            market_request = MarketRequest(
-                market_id=f"chat-{uuid4()}",
-                market_title=user_text[:100],  # Use question as title
-                market_question=user_text,
-                category=category,
-                resolution_criteria="To be determined by evidence analysis",
-                protected_terms=[],  # Will be extracted by agents
-                current_yes_price=0.5,  # Default middle price
-                current_no_price=0.5,
-            )
+            # DISPATCH-01: map RouterDecision onto existing MarketRequest fields (no protocol change)
+            market_request = _build_market_request_from_decision(user_text, decision)
 
             # Process through the pipeline by calling the existing handler
             # We'll use the request_id to track this for the user
@@ -589,6 +746,13 @@ Try asking me a prediction market question!
 
             # End session
             await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+
+    @chat_protocol.on_message(model=ChatAcknowledgement)
+    async def handle_chat_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
+        """Handle ACK receipts from users (required for protocol spec verification)."""
+        ctx.logger.info(
+            "[%s] ACK from %s for msg %s", AGENT_NAME, sender, msg.acknowledged_msg_id
+        )
 
 
 # ============================================================================
@@ -615,6 +779,14 @@ async def startup(ctx: Context):
         ctx.logger.info("ASI:One chat protocol: ENABLED (DeltaV compatible)")
     else:
         ctx.logger.info("ASI:One chat protocol: DISABLED (install uagents[chat])")
+
+    # LLM availability log (SAFETY-03 no-leak: log presence/absence string, NEVER the key value)
+    llm_enabled = bool(os.getenv("ASI1_API_KEY", "").strip())
+    ctx.logger.info(
+        "[%s] LLM %s", AGENT_NAME,
+        "ENABLED (ASI1_API_KEY present)" if llm_enabled
+        else "DISABLED (no ASI1_API_KEY — heuristic tier only)",
+    )
 
     # TODO: In production, these would be loaded from environment or discovery
     ctx.logger.info("Note: Configure agent addresses via environment variables or Agentverse discovery")
