@@ -1,0 +1,293 @@
+{
+  "count": 1,
+  "items": [
+    {
+      "awayTeamOdds": {
+        "close": {
+          "pointSpread": {
+            "alternateDisplayValue": "-0",
+            "american": "-0"
+          }
+        },
+        "current": {
+          "moneyLine": {
+            "alternateDisplayValue": "+219",
+            "american": "+219",
+            "decimal": 3.19,
+            "displayValue": "219/100",
+            "fraction": "219/100",
+            "value": 3.19
+          },
+          "pointSpread": {
+            "alternateDisplayValue": "+1.5",
+            "american": "+1.5"
+          },
+          "spread": {
+            "alternateDisplayValue": "+110",
+            "american": "+110",
+            "decimal": 2.1,
+            "displayValue": "11/10",
+            "fraction": "11/10",
+            "value": 2.1
+          }
+        },
+        "favorite": false,
+        "moneyLine": 219,
+        "open": {
+          "favorite": false,
+          "moneyLine": {
+            "alternateDisplayValue": "+209",
+            "american": "+209",
+            "decimal": 3.09,
+            "displayValue": "209/100",
+            "fraction": "209/100",
+            "value": 3.09
+          },
+          "pointSpread": {
+            "alternateDisplayValue": "+1.5",
+            "american": "+1.5"
+          },
+          "spread": {
+            "alternateDisplayValue": "-110",
+            "american": "-110",
+            "decimal": 1.9,
+            "displayValue": "10/11",
+            "fraction": "10/11",
+            "value": 1.9
+          }
+        },
+        "team": {
+          "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/teams/1?lang=en&region=us"
+        },
+        "underdog": true
+      },
+      "current": {
+        "over": {
+          "alternateDisplayValue": "-115",
+          "american": "-115",
+          "decimal": 1.86,
+          "displayValue": "20/23",
+          "fraction": "20/23",
+          "value": 1.86
+        },
+        "total": {
+          "alternateDisplayValue": "8",
+          "american": "8",
+          "decimal": 0.0,
+          "value": 0.0
+        },
+        "under": {
+          "alternateDisplayValue": "-104",
+          "american": "-104",
+          "decimal": 1.96,
+          "displayValue": "25/26",
+          "fraction": "25/26",
+          "value": 1.96
+        }
+      },
+      "details": "LAD -273",
+      "homeTeamOdds": {
+        "close": {
+          "pointSpread": {
+            "alternateDisplayValue": "+0",
+            "american": "+0",
+            "decimal": 0.0,
+            "value": 0.0
+          }
+        },
+        "current": {
+          "moneyLine": {
+            "alternateDisplayValue": "-273",
+            "american": "-273",
+            "decimal": 1.36,
+            "displayValue": "100/273",
+            "fraction": "100/273",
+            "value": 1.36
+          },
+          "pointSpread": {
+            "alternateDisplayValue": "-1.5",
+            "american": "-1.5",
+            "decimal": 0.0,
+            "value": 0.0
+          },
+          "spread": {
+            "alternateDisplayValue": "-133",
+            "american": "-133",
+            "decimal": 1.75,
+            "displayValue": "100/133",
+            "fraction": "100/133",
+            "value": 1.75
+          }
+        },
+        "favorite": true,
+        "moneyLine": -273,
+        "open": {
+          "favorite": true,
+          "moneyLine": {
+            "alternateDisplayValue": "-259",
+            "american": "-259",
+            "decimal": 1.38,
+            "displayValue": "100/259",
+            "fraction": "100/259",
+            "value": 1.38
+          },
+          "pointSpread": {
+            "alternateDisplayValue": "-1.5",
+            "american": "-1.5",
+            "decimal": 0.0,
+            "value": 0.0
+          },
+          "spread": {
+            "alternateDisplayValue": "-110",
+            "american": "-110",
+            "decimal": 1.9,
+            "displayValue": "10/11",
+            "fraction": "10/11",
+            "value": 1.9
+          }
+        },
+        "team": {
+          "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/teams/19?lang=en&region=us"
+        },
+        "underdog": false
+      },
+      "initialOverUnder": 0.0,
+      "initialSpread": 0.0,
+      "links": [
+        {
+          "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34297142%3Foutcomes%3D0ML85211142_1",
+          "isExternal": true,
+          "isPremium": false,
+          "language": "en-US",
+          "rel": [
+            "home",
+            "desktop",
+            "bets"
+          ],
+          "shortText": "Home Bet",
+          "text": "Home Bet"
+        },
+        {
+          "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34297142%3Foutcomes%3D0ML85211142_3",
+          "isExternal": true,
+          "isPremium": false,
+          "language": "en-US",
+          "rel": [
+            "away",
+            "desktop",
+            "bets"
+          ],
+          "shortText": "Away Bet",
+          "text": "Away Bet"
+        },
+        {
+          "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34297142%3Foutcomes%3D0HC85211142N150_1",
+          "isExternal": true,
+          "isPremium": false,
+          "language": "en-US",
+          "rel": [
+            "homeSpread",
+            "desktop",
+            "bets"
+          ],
+          "shortText": "Home Point Spread",
+          "text": "Home Point Spread"
+        },
+        {
+          "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34297142%3Foutcomes%3D0HC85211142P150_3",
+          "isExternal": true,
+          "isPremium": false,
+          "language": "en-US",
+          "rel": [
+            "awaySpread",
+            "desktop",
+            "bets"
+          ],
+          "shortText": "Away Point Spread",
+          "text": "Away Point Spread"
+        },
+        {
+          "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34297142%3Foutcomes%3D0OU85211142O800_1",
+          "isExternal": true,
+          "isPremium": false,
+          "language": "en-US",
+          "rel": [
+            "over",
+            "desktop",
+            "bets"
+          ],
+          "shortText": "Over Odds",
+          "text": "Over Odds"
+        },
+        {
+          "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34297142%3Foutcomes%3D0OU85211142U800_3",
+          "isExternal": true,
+          "isPremium": false,
+          "language": "en-US",
+          "rel": [
+            "under",
+            "desktop",
+            "bets"
+          ],
+          "shortText": "Under Odds",
+          "text": "Under Odds"
+        },
+        {
+          "href": "https://sportsbook.draftkings.com/gateway?s=__s__&wpcid=__wpcid__&wpsrc=413&wpcn=ESPN&wpscn=Widget&wpcrn=BetSlipDeepLink&wpscid=__wpscid__&wpcrid=xx&preurl=https%3A%2F%2Fsportsbook.draftkings.com%2Fevent%2F34297142",
+          "isExternal": true,
+          "isPremium": false,
+          "language": "en-US",
+          "rel": [
+            "game",
+            "desktop",
+            "bets"
+          ],
+          "shortText": "Game",
+          "text": "Game"
+        }
+      ],
+      "moneylineWinner": false,
+      "open": {
+        "over": {
+          "alternateDisplayValue": "-115",
+          "american": "-115",
+          "decimal": 1.86,
+          "displayValue": "20/23",
+          "fraction": "20/23",
+          "value": 1.86
+        },
+        "total": {
+          "alternateDisplayValue": "8.5",
+          "american": "8.5",
+          "decimal": 0.0,
+          "value": 0.0
+        },
+        "under": {
+          "alternateDisplayValue": "-105",
+          "american": "-105",
+          "decimal": 1.95,
+          "displayValue": "20/21",
+          "fraction": "20/21",
+          "value": 1.95
+        }
+      },
+      "overOdds": -115.0,
+      "overUnder": 8.0,
+      "price": 0.0,
+      "propBets": {
+        "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/events/401815836/competitions/401815836/odds/100/propBets?lang=en&region=us"
+      },
+      "provider": {
+        "id": "100",
+        "name": "DraftKings",
+        "priority": 1
+      },
+      "spread": -1.5,
+      "spreadWinner": false,
+      "underOdds": -104.0
+    }
+  ],
+  "pageCount": 1,
+  "pageIndex": 1,
+  "pageSize": 25
+}
