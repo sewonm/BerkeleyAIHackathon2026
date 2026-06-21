@@ -91,6 +91,18 @@ async def handle_decision_request(ctx: Context, sender: str, msg: DecisionReques
     ctx.logger.info(f"[{AGENT_NAME}] Decision: {decision.recommendation}")
     ctx.logger.info(f"Confidence: {decision.confidence:.2f}")
 
+    try:
+        from agent_memory_service import store_decision
+        store_decision(
+            market_id=msg.market_title,
+            decision=decision.recommendation,
+            confidence=decision.confidence,
+            reasoning=decision.reasoning,
+        )
+        ctx.logger.info(f"[{AGENT_NAME}] Stored decision in Agent Memory")
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] Agent Memory write skipped: {e}")
+
     # Send response
     response = DecisionResponse(
         request_id=msg.msg_id,

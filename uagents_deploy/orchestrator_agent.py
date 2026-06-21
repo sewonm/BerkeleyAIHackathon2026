@@ -110,6 +110,14 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
     except Exception as e:
         ctx.logger.warning(f"[{AGENT_NAME}] Redis cache check skipped: {e}")
 
+    try:
+        from agent_memory_service import search_past_decisions
+        past = search_past_decisions(msg.market_question, limit=3)
+        if past:
+            ctx.logger.info(f"[{AGENT_NAME}] Found {len(past)} past decisions for similar markets")
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] Agent Memory search skipped: {e}")
+
     # Initialize pipeline state
     state = PipelineState(request_id=str(msg.msg_id), market_request=msg)
     state.requester_address = sender

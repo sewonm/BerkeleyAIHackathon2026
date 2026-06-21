@@ -290,6 +290,14 @@ async def handle_evidence_request(ctx: Context, sender: str, msg: EvidenceReques
     except Exception as e:
         ctx.logger.warning(f"[{AGENT_NAME}] Redis write skipped: {e}")
 
+    try:
+        from agent_memory_service import store_evidence
+        for chunk in chunks:
+            store_evidence(market_id, AGENT_NAME, chunk.text)
+        ctx.logger.info(f"[{AGENT_NAME}] Stored {len(chunks)} events in Agent Memory")
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] Agent Memory write skipped: {e}")
+
     await ctx.send(sender, EvidenceResponse(
         request_id=msg.msg_id,
         agent_name=AGENT_NAME,
