@@ -49,7 +49,7 @@ export default function ResultsView({ result, agents = [], execution, question, 
   const rec = result.recommendation;
   const styles = REC_STYLES[rec];
   const totalChunks = agents.reduce((n, a) => n + a.chunks, 0);
-  const usedAgents = agents.filter((a) => a.status === "done");
+  const usedAgents = agents.filter((a) => a.status === "done" && a.chunks > 0);
 
   const riskChecks = [
     result.confidence >= 0.7,

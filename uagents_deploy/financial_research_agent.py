@@ -273,6 +273,32 @@ async def _search_markets(limit: int = 10) -> list[dict]:
 
 
 _HARDCODED_EVIDENCE: dict[str, list[dict]] = {
+    "FED-CUT-SEP26": [
+        {
+            "text": (
+                "=== Kalshi Market Data: Will the Fed cut interest rates in September 2026? ===\n"
+                "Market ID: FED-CUT-SEP26\n"
+                "YES Ask: $0.51 | YES Bid: $0.45 | Mid: $0.48\n"
+                "NO Ask: $0.55 | NO Bid: $0.49\n"
+                "Price Change (recent): +0.03 (slightly more optimistic on cut)\n"
+                "Volume: 98,400 contracts | Open Interest: 41,200\n"
+                "Status: open | Closes: 2026-09-20T18:00:00Z\n"
+            ),
+            "metadata": {"yes_mid": 0.48, "yes_ask": 0.51, "yes_bid": 0.45, "volume": 98400},
+        },
+        {
+            "text": (
+                "=== Fed Policy Context: September 2026 Cut ===\n"
+                "Current Fed Funds Rate: 4.25%-4.50%\n"
+                "June 2026 CPI: 2.8% YoY — above target but trending down\n"
+                "CME FedWatch: 48% probability of September cut, 52% hold\n"
+                "Recent Fed minutes: 'Patient approach warranted; data will guide timing'\n"
+                "Labor market: unemployment at 4.3%, softening but not alarming\n"
+                "Market consensus: too close to call — genuinely uncertain outcome\n"
+            ),
+            "metadata": {"kind": "macro", "source_strength": "high"},
+        },
+    ],
     "FED-RATES-JUL26": [
         {
             "text": (

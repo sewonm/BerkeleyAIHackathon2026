@@ -69,17 +69,20 @@ export default function MarketInput({ onAnalyze }: Props) {
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
           />
         </div>
-        <div className="flex flex-col gap-2">
-          <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">
-            Kalshi Ticker
-          </label>
-          <input
-            className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-teal-500/60 focus:bg-zinc-800 transition font-mono text-sm"
-            placeholder="FED-RATES-JUL26"
-            value={ticker}
-            onChange={(e) => setTicker(e.target.value)}
-          />
-        </div>
+        {/* Only show ticker field for custom questions */}
+        {!SAMPLE_MARKETS.find((m) => m.ticker === ticker) && (
+          <div className="flex flex-col gap-2">
+            <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">
+              Kalshi Ticker <span className="text-zinc-600 normal-case font-normal">(optional)</span>
+            </label>
+            <input
+              className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-teal-500/60 focus:bg-zinc-800 transition font-mono text-sm"
+              placeholder="e.g. MESSI-RETIRE-26 (leave blank to analyze any question)"
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value)}
+            />
+          </div>
+        )}
       </div>
 
       {/* Sample markets */}

@@ -228,7 +228,15 @@ async def collect_bundle(question: str, category: str = "culture", protected_ter
             try:
                 fetched = await asyncio.wait_for(fetch_as_markdown(url), timeout=3.0)
                 if fetched.strip():
-                    content = fetched[:2000]
+                    # Only prefer fetched content if it has actual prose, not just images/links
+                    prose_lines = [
+                        l for l in fetched.splitlines()
+                        if l.strip() and len(l.strip()) > 40
+                        and not l.strip().startswith(("!", "[", "#", "http", "---", "==="))
+                        and "](" not in l
+                    ]
+                    if prose_lines:
+                        content = fetched[:2000]
             except Exception:
                 pass
         return url, title, content, provider, query, kind
