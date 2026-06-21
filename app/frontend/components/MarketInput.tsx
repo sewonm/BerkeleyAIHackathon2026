@@ -24,7 +24,7 @@ export default function MarketInput({ onAnalyze }: Props) {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-4xl font-bold text-white mb-2">[name]</h1>
+        <h1 className="text-4xl font-bold text-white mb-2">SignalForge</h1>
         <p className="text-zinc-400 text-lg">
           Multi-agent prediction market intelligence · Powered by Fetch.ai &amp; Kalshi
         </p>

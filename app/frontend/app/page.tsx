@@ -33,7 +33,7 @@ export default function Home() {
     <main className="min-h-screen bg-zinc-900 text-white">
       <div className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-teal-400 font-bold text-sm">[name]</span>
+          <span className="text-teal-400 font-bold text-sm">SignalForge</span>
           <span className="text-zinc-600 text-xs">·</span>
           <div className="flex gap-1">
             {STEPS.map((s, i) => (

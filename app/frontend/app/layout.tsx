@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "[name] — Prediction Market Intelligence",
+  title: "SignalForge — Prediction Market Intelligence",
   description: "Multi-agent AI trading system powered by Fetch.ai and Kalshi",
 };
 
