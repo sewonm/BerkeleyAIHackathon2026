@@ -195,13 +195,17 @@ def test_empty_when_offline_without_fixtures(tmp_path):
 class TestSportsAgentLivePath:
     """run() takes the live ESPN path when not forced offline."""
 
-    def test_run_returns_http_chunks_from_fixtures(self, monkeypatch):
-        # Live path on; ESPN client reads fixtures offline via env. Noisy layer
-        # forced offline (no fixtures) so the bundle is anchor-only -> all http.
+    def test_run_returns_http_chunks_from_fixtures(self, monkeypatch, tmp_path):
+        # Live path on; ESPN client reads fixtures offline via env. Noisy + search
+        # forced offline with ISOLATED cache dirs (so the real .cache can't leak)
+        # -> the bundle is anchor-only -> all http.
         monkeypatch.delenv("SPORTS_AGENT_OFFLINE", raising=False)
         monkeypatch.setenv("ESPN_FIXTURES_DIR", str(FIXTURES_DIR))
         monkeypatch.setenv("ESPN_OFFLINE", "1")
         monkeypatch.setenv("BROWSERBASE_OFFLINE", "1")
+        monkeypatch.setenv("BROWSERBASE_CACHE_DIR", str(tmp_path / "bb"))
+        monkeypatch.setenv("SEARCH_OFFLINE", "1")
+        monkeypatch.setenv("SEARCH_CACHE_DIR", str(tmp_path / "search"))
 
         from app.agents.sports_video_agent import SportsVideoAgent
 
@@ -221,6 +225,9 @@ class TestSportsAgentLivePath:
         monkeypatch.setenv("ESPN_FIXTURES_DIR", str(tmp_path))
         monkeypatch.setenv("ESPN_OFFLINE", "1")
         monkeypatch.setenv("BROWSERBASE_OFFLINE", "1")
+        monkeypatch.setenv("BROWSERBASE_CACHE_DIR", str(tmp_path / "bb"))
+        monkeypatch.setenv("SEARCH_OFFLINE", "1")
+        monkeypatch.setenv("SEARCH_CACHE_DIR", str(tmp_path / "search"))
 
         from app.agents.sports_video_agent import SportsVideoAgent
 

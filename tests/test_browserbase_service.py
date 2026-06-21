@@ -97,6 +97,9 @@ class _FakePage:
     def wait_for_selector(self, *_a, **_k):
         pass
 
+    def wait_for_timeout(self, *_a, **_k):
+        pass
+
     def inner_text(self, _sel):
         return "  LIVE   raw\n\n\n body  text "
 

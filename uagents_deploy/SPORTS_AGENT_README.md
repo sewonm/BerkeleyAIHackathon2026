@@ -6,10 +6,11 @@
 
 Given a Kalshi **sports** market question, this agent resolves the sport/league and the live (or most-recent) game, then returns a wide **raw evidence bundle** as `EvidenceChunk`s — ready for a downstream compression engine.
 
-**Sport-agnostic** (NBA/NFL/MLB/soccer/…) via a sport→source registry; showcased on the **2026 FIFA World Cup** and **MLB**. Each evidence bundle blends:
+**Sport-agnostic** (NBA/NFL/MLB/soccer/…) via a sport→source registry; showcased on the **2026 FIFA World Cup** and **MLB**. Each evidence bundle blends **three layers** (typically 50–70 raw chunks per query):
 
 - **Live ESPN HTTP anchor** — score/state, box/match stats, event log, betting **odds with open/close/current line movement**, win/implied probability, injuries, lineups.
-- **Browserbase noisy layer** — raw scraped text from deep-stats + match-thread sources (FBref/Sofascore/Reddit).
+- **Browserbase noisy layer** — raw scraped text from JS/anti-bot sources (Wikipedia, FBref/Sofascore, Reddit) via a real Playwright-over-CDP session.
+- **Web-search discovery** — query-aware general search (Google News + DuckDuckGo + ESPN news) built from the market's entities × intents (injury / odds / preview / lineup), surfacing dozens of relevant headlines + snippets.
 
 ## Agent Address
 
@@ -53,8 +54,8 @@ Each chunk in the bundle has the following shape:
   "source_url": "https://site.api.espn.com/...",
   "confidence": 0.9,
   "metadata": {
-    "kind": "score_state | box_stats | event_log | odds | win_probability | injuries | lineups | deep_stats | match_thread",
-    "fetched_via": "http | browserbase",
+    "kind": "score_state | box_stats | event_log | odds | win_probability | injuries | lineups | deep_stats | match_thread | preview | news | article",
+    "fetched_via": "http | browserbase | search",
     "source_strength": "anchor | noisy",
     "observed_at": "2026-06-20T00:00:00Z",
     "sport": "soccer",

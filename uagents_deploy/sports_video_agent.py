@@ -31,6 +31,15 @@ Finish. That connects it to Agentverse and makes it discoverable on ASI:One.
 import os
 import asyncio
 
+# Load .env (repo root) so BROWSERBASE_API_KEY / SPORTS_VIDEO_AGENT_SEED / etc. are
+# available when the agent runs locally — must happen before any os.getenv below.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+except Exception:
+    pass
+
 from uagents import Agent, Context, Protocol
 from protocols.messages import (
     EvidenceRequest,

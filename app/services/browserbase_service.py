@@ -62,6 +62,10 @@ class BrowserbaseService:
         session_timeout: int = MAX_SESSION_SECONDS,
         offline: bool = False,
         prefer_xhr: bool = True,
+        settle_ms: int = 3500,
+        proxies: Optional[bool] = None,
+        stealth: Optional[bool] = None,
+        solve_captchas: Optional[bool] = None,
     ) -> None:
         """
         Args:
@@ -74,6 +78,12 @@ class BrowserbaseService:
             offline: never touch the network (cache/fixtures only) — env ``BROWSERBASE_OFFLINE``.
             prefer_xhr: fetch clean JSON feeds (e.g. Reddit ``.json``) directly
                 instead of spinning up a browser.
+            settle_ms: wait after navigation for JS / soft anti-bot challenges to
+                resolve before reading text.
+            proxies / stealth / solve_captchas: Browserbase anti-bot features for
+                hard targets (Cloudflare, etc.). PROXIES + ADVANCED STEALTH ARE
+                BILLED — default OFF. Enable via env BROWSERBASE_PROXIES /
+                BROWSERBASE_STEALTH / BROWSERBASE_SOLVE_CAPTCHAS = 1.
         """
         self.api_key = api_key or os.getenv("BROWSERBASE_API_KEY", "") or ""
         self.project_id = project_id or os.getenv("BROWSERBASE_PROJECT_ID", "") or ""
@@ -90,6 +100,16 @@ class BrowserbaseService:
             offline = os.getenv("BROWSERBASE_OFFLINE", "").strip().lower() in {"1", "true", "yes"}
         self.offline = offline
         self.prefer_xhr = prefer_xhr
+        self.settle_ms = settle_ms
+
+        def _envflag(name: str) -> bool:
+            return os.getenv(name, "").strip().lower() in {"1", "true", "yes"}
+
+        self.proxies = _envflag("BROWSERBASE_PROXIES") if proxies is None else proxies
+        self.stealth = _envflag("BROWSERBASE_STEALTH") if stealth is None else stealth
+        self.solve_captchas = (
+            _envflag("BROWSERBASE_SOLVE_CAPTCHAS") if solve_captchas is None else solve_captchas
+        )
 
         # explicit lifecycle handles (SA-SCRAPE-01); managed internally too
         self._session = None
@@ -118,42 +138,46 @@ class BrowserbaseService:
         self, url: str, *, wait_selector: Optional[str] = None,
         max_chars: Optional[int] = None,
     ) -> Optional[str]:
-        """Return RAW readable text for ``url`` (cache -> fixture -> xhr -> live).
+        """Return RAW readable text for ``url``. Never raises (None on total miss).
 
-        Never raises — returns None if no path yields text.
+        Resolution:
+          * cache is always consulted first (fast, stable re-runs).
+          * OFFLINE  -> cache, then fixtures, else None (deterministic, no network).
+          * ONLINE   -> cache, then FRESH (clean XHR feed, then live Browserbase
+                        CDP), then fixtures as a safety net. So with a key present,
+                        every target genuinely attempts a live Browserbase scrape.
         """
         cap = max_chars or self.max_chars
         name = cache_name(url)
 
-        # 1) cache
+        # cache always wins
         cached = self._read_text(self.cache_dir / name)
         if cached is not None:
             return cached[:cap]
 
-        # 2) fixtures
+        # offline: fixtures only
+        if self.offline:
+            fx = self._read_text(self.fixtures_dir / name) if self.fixtures_dir else None
+            return fx[:cap] if fx is not None else None
+
+        # online: try FRESH content first
+        text: Optional[str] = None
+        if self.prefer_xhr and self._looks_like_feed(url):
+            text = self._xhr_scrape(url)
+        if text is None and self.has_live_capability:
+            text = self._live_scrape(url, wait_selector)
+
+        if text:
+            text = self._clean(text)[:cap]
+            self._write_text(self.cache_dir / name, text)
+            return text
+
+        # fresh fetch failed (no capability / blocked) -> fixtures fallback
         if self.fixtures_dir is not None:
             fx = self._read_text(self.fixtures_dir / name)
             if fx is not None:
                 return fx[:cap]
-
-        if self.offline:
-            return None
-
-        # 3) clean XHR/JSON feed (no browser needed)
-        text: Optional[str] = None
-        if self.prefer_xhr and self._looks_like_feed(url):
-            text = self._xhr_scrape(url)
-
-        # 4) live Browserbase CDP session
-        if text is None and self.has_live_capability:
-            text = self._live_scrape(url, wait_selector)
-
-        if not text:
-            return None
-
-        text = self._clean(text)[:cap]
-        self._write_text(self.cache_dir / name, text)
-        return text
+        return None
 
     # -- explicit lifecycle (SA-SCRAPE-01: create/navigate/extract/close) --
 
@@ -205,14 +229,29 @@ class BrowserbaseService:
 
     # -- internals ---------------------------------------------------------
 
+    def _browser_settings(self) -> dict:
+        """Anti-bot session settings (only the enabled, free-by-default ones)."""
+        settings: dict = {}
+        if self.stealth:
+            settings["advancedStealth"] = True
+        if self.solve_captchas:
+            settings["solveCaptchas"] = True
+        return settings
+
     def _create_bb_session(self):
         """Create a Browserbase session; return (connect_url, raw_session)."""
+        settings = self._browser_settings()
         # Prefer the official SDK; fall back to the REST API via httpx.
         try:
             from browserbase import Browserbase  # type: ignore
 
             bb = Browserbase(api_key=self.api_key)
-            session = bb.sessions.create(project_id=self.project_id)
+            kwargs = {"project_id": self.project_id}
+            if self.proxies:
+                kwargs["proxies"] = True
+            if settings:
+                kwargs["browser_settings"] = settings
+            session = bb.sessions.create(**kwargs)
             connect_url = getattr(session, "connect_url", None) or getattr(
                 session, "connectUrl", None
             )
@@ -224,10 +263,15 @@ class BrowserbaseService:
         # REST fallback
         import httpx
 
+        body = {"projectId": self.project_id}
+        if self.proxies:
+            body["proxies"] = True
+        if settings:
+            body["browserSettings"] = settings
         resp = httpx.post(
             "https://api.browserbase.com/v1/sessions",
             headers={"X-BB-API-Key": self.api_key, "Content-Type": "application/json"},
-            json={"projectId": self.project_id},
+            json=body,
             timeout=30,
         )
         resp.raise_for_status()
@@ -257,13 +301,46 @@ class BrowserbaseService:
                             page.wait_for_selector(wait_selector, timeout=6000)
                         except Exception:
                             pass
-                    if (time.time() - start) < self.session_timeout:
+                    # let JS render / soft anti-bot challenges resolve
+                    page.wait_for_timeout(self.settle_ms)
+                    text = page.inner_text("body")
+                    # one extra wait + re-read if we hit a JS bot-challenge interstitial
+                    if self._is_challenge(text) and (time.time() - start) < self.session_timeout:
+                        page.wait_for_timeout(6000)
                         text = page.inner_text("body")
                 finally:
                     browser.close()  # release the Browserbase session, always
         except Exception:
             return None
+        # a challenge page is not real content -> treat as a miss (falls back)
+        if text and self._is_challenge(text):
+            return None
         return text
+
+    @staticmethod
+    def _is_challenge(text: str) -> bool:
+        """True if the page is an anti-bot / cookie / login WALL, not real content.
+
+        Such pages are treated as a miss so scrape_text falls back to the curated
+        fixture (better than leaking wall text into the evidence bundle). Getting
+        past these needs Browserbase residential proxies/stealth (BROWSERBASE_PROXIES
+        /BROWSERBASE_STEALTH) or a cookie-banner dismissal step.
+        """
+        if not text:
+            return True
+        t = text.lower()
+        return any(
+            s in t for s in (
+                # anti-bot / JS challenges
+                "security verification", "are not a bot", "verifying you are human",
+                "checking your browser", "enable javascript and cookies",
+                # network / IP blocks (datacenter IPs)
+                "blocked by network security", "log in to your reddit account",
+                # cookie-consent walls
+                "utilizes technologies such as cookies",
+                "we use cookies and similar", "accept all cookies",
+            )
+        )
 
     @staticmethod
     def _looks_like_feed(url: str) -> bool:

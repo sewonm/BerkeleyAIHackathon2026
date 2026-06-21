@@ -64,6 +64,13 @@ SPORT_REGISTRY: dict[str, SportConfig] = {
             "la liga", "champions league", "messi", "argentina", "brazil", "group stage",
         ),
         scrape_targets=(
+            # Reliably scrapable via Browserbase (no paid proxy needed) -> live content.
+            ScrapeTarget(
+                kind="preview",
+                label="Wikipedia World Cup",
+                url="https://en.wikipedia.org/wiki/2026_FIFA_World_Cup",
+            ),
+            # Hard anti-bot (Cloudflare): need Browserbase proxies/stealth; else fixture.
             ScrapeTarget(
                 kind="deep_stats",
                 label="FBref World Cup",
@@ -91,6 +98,11 @@ SPORT_REGISTRY: dict[str, SportConfig] = {
             "pitcher", "innings", "al east", "nl west",
         ),
         scrape_targets=(
+            ScrapeTarget(
+                kind="preview",
+                label="Wikipedia MLB season",
+                url="https://en.wikipedia.org/wiki/2026_Major_League_Baseball_season",
+            ),
             ScrapeTarget(
                 kind="deep_stats",
                 label="Baseball Reference",

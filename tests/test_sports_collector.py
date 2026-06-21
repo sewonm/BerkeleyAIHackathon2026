@@ -21,6 +21,12 @@ NOISY_FIX = Path(__file__).parent / "fixtures" / "noisy"
 FIXED_TS = "2026-06-20T00:00:00Z"
 
 
+@pytest.fixture(autouse=True)
+def _search_offline(monkeypatch):
+    """Keep the web-search discovery layer off the network in these tests."""
+    monkeypatch.setenv("SEARCH_OFFLINE", "1")
+
+
 def _espn():
     return ESPNClient(fixtures_dir=ESPN_FIX, offline=True)
 

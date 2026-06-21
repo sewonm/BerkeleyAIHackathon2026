@@ -95,24 +95,34 @@ def collect_sports_evidence(
     observed_at: Optional[str] = None,
     anchor: bool = True,
     noisy: bool = True,
+    search: bool = True,
     espn_client: Optional[ESPNClient] = None,
     browserbase: Optional[BrowserbaseService] = None,
+    web=None,
     max_noisy: Optional[int] = None,
+    search_max_results: int = 60,
+    deep_scrape_top: int = 0,
 ) -> List[EvidenceChunk]:
     """Collect the merged sports evidence bundle for a market.
 
+    Three layers, each isolated (a failure in one never kills the others):
+      * anchor  — ESPN HTTP live stats (Phase 2)
+      * noisy   — Browserbase scrapes of registry targets (Phase 3)
+      * search  — general web-search discovery (Google News / DuckDuckGo / ESPN news),
+                  optionally deep-scraping the top results via Browserbase
+
     Args:
-        market: Market (or string). Drives sport + event resolution.
+        market: Market (or string). Drives sport + event + query resolution.
         sport: force a registry sport key (skips keyword resolution).
         observed_at: fixed timestamp for deterministic output (default: now UTC).
-        anchor: include the ESPN HTTP anchor layer (Phase 2).
-        noisy: include the Browserbase noisy layer (Phase 3).
-        espn_client / browserbase: inject configured services (fixtures/cache/live).
+        anchor / noisy / search: toggle each layer.
+        espn_client / browserbase / web: inject configured services (fixtures/cache/live).
         max_noisy: cap noisy scrape targets.
+        search_max_results: cap discovery results.
+        deep_scrape_top: full-text-scrape the top-N discovered URLs via Browserbase.
 
     Returns:
-        Merged, de-duplicated ``list[EvidenceChunk]`` (anchor first, then noisy).
-        Each layer is isolated — a failure in one never kills the other.
+        Merged, de-duplicated ``list[EvidenceChunk]`` (anchor, then noisy, then search).
     """
     observed_at = observed_at or _utc_now()
     cfg: SportConfig = get_sport_config(sport) if sport else resolve_sport(market)
@@ -135,6 +145,20 @@ def collect_sports_evidence(
                 collect_noisy_evidence(
                     market, service=browserbase, sport=cfg.key,
                     observed_at=observed_at, max_targets=max_noisy,
+                )
+            )
+        except Exception:
+            pass
+
+    if search:
+        try:
+            from app.services.web_search import collect_search_evidence
+
+            chunks.extend(
+                collect_search_evidence(
+                    market, sport_cfg=cfg, observed_at=observed_at, web=web,
+                    max_results=search_max_results, deep_scrape_top=deep_scrape_top,
+                    browserbase=browserbase,
                 )
             )
         except Exception:

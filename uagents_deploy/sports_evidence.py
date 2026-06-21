@@ -27,12 +27,14 @@ if REPO_ROOT not in sys.path:
 ESPN_FIXTURES = os.path.join(REPO_ROOT, "tests", "fixtures", "espn")
 NOISY_FIXTURES = os.path.join(REPO_ROOT, "tests", "fixtures", "noisy")
 ESPN_CACHE = os.path.join(REPO_ROOT, ".cache", "espn")
+SEARCH_CACHE = os.path.join(REPO_ROOT, ".cache", "search")
 
 try:
     from app.schemas.market import Market
     from app.services.sports_collector import collect_sports_evidence, derive_entities
     from app.services.espn.client import ESPNClient
     from app.services.browserbase_service import BrowserbaseService
+    from app.services.web_search import WebSearchService
 
     LIVE_AVAILABLE = True
     IMPORT_ERR = None
@@ -102,6 +104,7 @@ def collect_bundle(question: str, category: str = "sports"):
             market,
             espn_client=ESPNClient(cache_dir=ESPN_CACHE),
             browserbase=BrowserbaseService(fixtures_dir=NOISY_FIXTURES),
+            web=WebSearchService(cache_dir=SEARCH_CACHE),  # live web-search discovery
         )
     except Exception:
         chunks = []
@@ -113,6 +116,7 @@ def collect_bundle(question: str, category: str = "sports"):
                 market,
                 espn_client=ESPNClient(fixtures_dir=ESPN_FIXTURES, offline=True),
                 browserbase=BrowserbaseService(fixtures_dir=NOISY_FIXTURES, offline=True),
+                web=WebSearchService(offline=True),
             )
         except Exception:
             chunks = []
@@ -133,6 +137,7 @@ def format_chat_reply(question: str, msgs: list, meta: dict) -> str:
     """Human-readable evidence summary for ASI:One + full JSON bundle for machines."""
     anchor = [m for m in msgs if m.metadata.get("fetched_via") == "http"]
     noisy = [m for m in msgs if m.metadata.get("fetched_via") == "browserbase"]
+    search = [m for m in msgs if m.metadata.get("fetched_via") == "search"]
 
     lines = [f'🏟️ Sports evidence bundle for: "{(question or "").strip()[:140]}"']
     if meta.get("sport"):
@@ -144,12 +149,20 @@ def format_chat_reply(question: str, msgs: list, meta: dict) -> str:
         lines.append("Entities: " + ", ".join(meta["entities"]))
     lines.append(
         f"Source: {meta.get('source', 'live')} • {len(msgs)} chunks "
-        f"({len(anchor)} live-stats anchor / {len(noisy)} noisy scrape)"
+        f"({len(anchor)} live-stats anchor / {len(noisy)} noisy scrape / "
+        f"{len(search)} web-search discovery)"
     )
+
+    # Highlights only (full set is in the JSON below) — keep the chat readable.
+    SHOW = 14
     lines.append("")
-    for m in msgs:
+    lines.append("Highlights:")
+    for m in (anchor + noisy + search)[:SHOW]:
         first = (m.text or "").splitlines()[0] if m.text else ""
         lines.append(f"• [{m.metadata.get('kind', '?')}] {first[:100]}")
+    if len(msgs) > SHOW:
+        lines.append(f"…and {len(msgs) - SHOW} more (full bundle in JSON below)")
+
     lines.append("")
     lines.append("```json")
     lines.append(json.dumps([m.model_dump() for m in msgs], default=str))

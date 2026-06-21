@@ -29,6 +29,7 @@ def _offline_fixtures(monkeypatch):
     monkeypatch.setenv("ESPN_FIXTURES_DIR", str(ESPN_FIX))
     monkeypatch.setenv("ESPN_OFFLINE", "1")
     monkeypatch.setenv("BROWSERBASE_OFFLINE", "1")
+    monkeypatch.setenv("SEARCH_OFFLINE", "1")
 
 
 def _extract_bundle_json(text: str):
