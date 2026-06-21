@@ -35,6 +35,7 @@ if exec_pem.exists():
 from app.schemas.execution import TradeDecision, ExecutionResult
 from app.services.kalshi_executor import (
     build_order_from_decision,
+    fetch_live_ticker,
     load_private_key,
     create_signature,
     execute_decision,
@@ -54,14 +55,29 @@ print(f"KALSHI_BASE_URL:            {KALSHI_BASE_URL}")
 
 # ── 2. Dry-run validation ──────────────────────────────────────────────────────
 print("\n=== DRY-RUN VALIDATION ===")
+
+# Fetch a real ticker from the demo account so validation uses a market that exists.
+_ticker = "PLACEHOLDER-TICKER"
+_yes_price = 0.50
+_market_question = "Live market from demo account"
+if KALSHI_API_KEY and KALSHI_PRIVATE_KEY_PATH:
+    try:
+        _ticker, _yes_price = fetch_live_ticker()
+        _market_question = f"Live demo market: {_ticker}"
+        print(f"Fetched live ticker: {_ticker}  yes_price={_yes_price:.2f}")
+    except Exception as _e:
+        print(f"Could not fetch live ticker ({_e}), using placeholder for dry-run")
+else:
+    print("No credentials set — using placeholder ticker for dry-run")
+
 decision = TradeDecision(
-    ticker="KXMLBHIT-26JUN211605LAAATH-LAAJADELL7-2",
-    market_question="Jo Adell: 2+ hits?",
+    ticker=_ticker,
+    market_question=_market_question,
     recommendation="YES",
     confidence=0.80,
     fair_probability=0.60,
     edge=0.10,
-    current_yes_price=0.50,
+    current_yes_price=_yes_price,
     max_order_dollars=1.00,
     dry_run=True,
 )
@@ -101,14 +117,21 @@ except Exception as e:
 # ── 4. Live order (only with --live flag) ──────────────────────────────────────
 if LIVE:
     print("\n=== LIVE ORDER SUBMIT ===")
+    try:
+        live_ticker, live_yes_price = fetch_live_ticker()
+        print(f"Fetched live ticker for order: {live_ticker}  yes_price={live_yes_price:.2f}")
+    except Exception as _e:
+        print(f"FAIL: Could not fetch live ticker: {_e}")
+        sys.exit(1)
+
     live_decision = TradeDecision(
-        ticker="INXD-25DEC31-B5000",
-        market_question="Will the S&P 500 close above 5000 on Dec 31?",
+        ticker=live_ticker,
+        market_question=f"Live demo market: {live_ticker}",
         recommendation="YES",
         confidence=0.80,
         fair_probability=0.60,
         edge=0.10,
-        current_yes_price=0.50,
+        current_yes_price=live_yes_price,
         max_order_dollars=1.00,
         dry_run=False,
     )

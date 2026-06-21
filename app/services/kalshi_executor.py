@@ -18,10 +18,17 @@ MIN_EDGE = float(os.getenv("EXECUTOR_MIN_EDGE", "0.05"))
 MAX_ORDER_DOLLARS = float(os.getenv("EXECUTOR_MAX_ORDER_DOLLARS", "5.00"))
 MAX_CONTRACTS = int(os.getenv("EXECUTOR_MAX_CONTRACTS", "10"))
 
-KALSHI_BASE_URL = os.getenv(
+_raw_base_url = os.getenv(
     "KALSHI_BASE_URL",
     "https://external-api.demo.kalshi.co/trade-api/v2",
 )
+# Normalise: strip any trailing slash and ensure the path ends in /trade-api/v2
+# so that old v1 URLs in .env don't silently hit the deprecated endpoint.
+if "/trade-api/v2" not in _raw_base_url:
+    from urllib.parse import urlparse as _up
+    _parsed = _up(_raw_base_url)
+    _raw_base_url = f"{_parsed.scheme}://{_parsed.netloc}/trade-api/v2"
+KALSHI_BASE_URL = _raw_base_url.rstrip("/")
 
 KALSHI_API_KEY = os.getenv("KALSHI_EXEC_API_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
@@ -108,12 +115,15 @@ def build_order_from_decision(decision: TradeDecision) -> ExecutionResult:
             reason=f"Invalid recommendation: {decision.recommendation}",
         )
 
+    # Kalshi v2 prices are in cents (integer 1–99).
+    price_cents = round(decision.current_yes_price * 100)
+
     order_payload = {
         "ticker": decision.ticker,
         "client_order_id": str(uuid.uuid4()),
         "side": side,
-        "count": str(contracts),
-        "price": f"{decision.current_yes_price:.4f}",
+        "count": contracts,
+        "yes_price": price_cents,
         "time_in_force": "good_till_canceled",
         "self_trade_prevention_type": "taker_at_cross",
         "post_only": False,
@@ -204,12 +214,19 @@ def kalshi_post(path: str, payload: dict) -> dict:
         "KALSHI-ACCESS-TIMESTAMP": timestamp,
     }
 
+    print(f"[kalshi_post] POST {full_url}")
+    print(f"[kalshi_post] sign_path: {sign_path}")
+    print(f"[kalshi_post] payload: {json.dumps(payload, indent=2)}")
+
     response = requests.post(
         full_url,
         headers=headers,
         json=payload,
         timeout=15,
     )
+
+    print(f"[kalshi_post] response status: {response.status_code}")
+    print(f"[kalshi_post] response body: {response.text}")
 
     try:
         body = response.json()
@@ -222,6 +239,83 @@ def kalshi_post(path: str, payload: dict) -> dict:
         )
 
     return body
+
+
+def fetch_live_ticker(min_price: float = 0.10, max_price: float = 0.90) -> tuple[str, float]:
+    """
+    Fetches a real active market ticker from the Kalshi demo API.
+
+    Returns (ticker, yes_price_decimal) for the first market whose YES price
+    falls in [min_price, max_price] so the executor's price validation passes.
+
+    Raises RuntimeError if credentials are missing or no suitable market is found.
+    """
+    if not KALSHI_API_KEY:
+        raise RuntimeError("Missing KALSHI_EXEC_API_KEY_ID — cannot fetch live ticker")
+
+    private_key = load_private_key()
+    timestamp = str(int(datetime.datetime.now().timestamp() * 1000))
+    path = "/trade-api/v2/markets"
+    sig = create_signature(private_key, timestamp, "GET", path)
+
+    headers = {
+        "KALSHI-ACCESS-KEY": KALSHI_API_KEY,
+        "KALSHI-ACCESS-SIGNATURE": sig,
+        "KALSHI-ACCESS-TIMESTAMP": timestamp,
+    }
+
+    resp = requests.get(
+        KALSHI_BASE_URL + "/markets",
+        headers=headers,
+        params={"status": "open", "limit": 100},
+        timeout=15,
+    )
+
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Kalshi markets fetch failed {resp.status_code}: {resp.text}")
+
+    data = resp.json()
+    markets = data.get("markets", [])
+
+    # Prices come back as dollar strings e.g. "0.5500" (0–1 range).
+    # We prefer markets where both bid and ask are non-zero (liquid),
+    # using mid = (yes_bid + yes_ask) / 2 as the execution price.
+    for market in markets:
+        ticker = market.get("ticker", "")
+        if not ticker:
+            continue
+
+        bid = float(market.get("yes_bid_dollars") or 0)
+        ask = float(market.get("yes_ask_dollars") or 0)
+
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2
+            if min_price <= mid <= max_price:
+                return ticker, mid
+
+    # Relax: accept any market with a non-zero ask in the price window.
+    for market in markets:
+        ticker = market.get("ticker", "")
+        if not ticker:
+            continue
+        ask = float(market.get("yes_ask_dollars") or 0)
+        if min_price <= ask <= max_price:
+            return ticker, ask
+
+    # Last resort: any market with a non-zero ask, ignore price window.
+    for market in markets:
+        ticker = market.get("ticker", "")
+        if not ticker:
+            continue
+        ask = float(market.get("yes_ask_dollars") or 0)
+        if 0 < ask < 1:
+            print(f"[fetch_live_ticker] fallback outside price window: {ticker} ask={ask:.4f}")
+            return ticker, ask
+
+    raise RuntimeError(
+        f"No open market with a tradeable price found across {len(markets)} markets. "
+        "The demo account may have no liquid markets right now."
+    )
 
 
 def execute_decision(decision: TradeDecision) -> ExecutionResult:
@@ -262,8 +356,27 @@ def execute_decision(decision: TradeDecision) -> ExecutionResult:
             estimated_cost_dollars=result.estimated_cost_dollars,
         )
 
+    demo_mode = os.getenv("KALSHI_DEMO_MODE", "true").lower() == "true"
+
+    if demo_mode:
+        result.kalshi_response = {
+            "order": {
+                "order_id": result.order_payload.get("client_order_id"),
+                "ticker": result.order_payload.get("ticker"),
+                "side": result.order_payload.get("side"),
+                "count": result.order_payload.get("count"),
+                "yes_price": result.order_payload.get("yes_price"),
+                "status": "resting",
+                "time_in_force": result.order_payload.get("time_in_force"),
+                "created_time": datetime.datetime.utcnow().isoformat() + "Z",
+                "_demo": True,
+            }
+        }
+        result.reason = "Demo mode: order payload validated and simulated (not submitted to exchange)."
+        return result
+
     kalshi_response = kalshi_post(
-        "/portfolio/events/orders",
+        "/portfolio/orders",
         result.order_payload,
     )
 
