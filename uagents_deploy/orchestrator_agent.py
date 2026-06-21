@@ -33,7 +33,7 @@ from protocols.messages import (
 
 # ASI:One chat protocol support (optional, gracefully degrades if unavailable)
 try:
-    from uagents.chat import (
+    from uagents_core.contrib.protocols.chat import (
         chat_protocol_spec,
         ChatMessage,
         TextContent,
@@ -43,21 +43,20 @@ try:
     CHAT_PROTOCOL_AVAILABLE = True
 except ImportError:
     print("[Warning] Chat protocol not available - ASI:One integration disabled")
-    print("Install with: pip install uagents[chat]")
     CHAT_PROTOCOL_AVAILABLE = False
 
 # Agent configuration
 AGENT_NAME = "orchestrator_agent"
 AGENT_SEED = "11bf23bf45f76363d673a7f453c393ba5e5920c91418427c9d44dcff20021437"
 AGENT_PORT = 8000
-AGENT_MAILBOX = True
+_AGENTVERSE_KEY = os.getenv("AGENTVERSE_API_KEY", "")
 
 # Create the agent
 agent = Agent(
     name=AGENT_NAME,
     seed=AGENT_SEED,
     port=AGENT_PORT,
-    mailbox=AGENT_MAILBOX,
+    mailbox=_AGENTVERSE_KEY if _AGENTVERSE_KEY else True,
 )
 
 # Create protocol for agent-to-agent communication
@@ -65,7 +64,7 @@ orchestration_protocol = Protocol("MarketOrchestration")
 
 # Protocol for ASI:One/DeltaV interaction (if available)
 if CHAT_PROTOCOL_AVAILABLE:
-    chat_protocol = Protocol("Chat", spec=chat_protocol_spec)
+    chat_protocol = Protocol(spec=chat_protocol_spec)
 
 # Agent addresses — set these as env vars on Agentverse or in local .env
 AGENT_ADDRESSES = {
@@ -590,6 +589,10 @@ Try asking me a prediction market question!
             # End session
             await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
 
+    @chat_protocol.on_message(model=ChatAcknowledgement)
+    async def handle_chat_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
+        ctx.logger.info(f"[{AGENT_NAME}] Chat acknowledgement received from {sender}")
+
 
 # ============================================================================
 # Protocol Inclusion
@@ -600,7 +603,11 @@ agent.include(orchestration_protocol, publish_manifest=False)
 
 # Include ASI:One chat protocol if available
 if CHAT_PROTOCOL_AVAILABLE:
-    agent.include(chat_protocol, publish_manifest=True)
+    try:
+        agent.include(chat_protocol, publish_manifest=True)
+    except Exception as _e:
+        print(f"[Warning] Chat protocol manifest publish failed ({_e}), retrying without publish")
+        agent.include(chat_protocol, publish_manifest=False)
 
 
 @agent.on_event("startup")
