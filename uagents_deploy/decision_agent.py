@@ -82,6 +82,31 @@ async def handle_decision_request(ctx: Context, sender: str, msg: DecisionReques
         {"text": msg.compressed_context, "score": 1.0}
     ]
 
+    try:
+        import json
+        from langcache_service import cache_get
+        cached_json = cache_get(msg.compressed_context)
+        if cached_json:
+            cached = json.loads(cached_json)
+            ctx.logger.info(f"[{AGENT_NAME}] LangCache hit — returning cached decision")
+            await ctx.send(sender, DecisionResponse(
+                request_id=msg.msg_id,
+                recommendation=cached["recommendation"],
+                confidence=cached["confidence"],
+                fair_probability=cached["fair_probability"],
+                reasoning=cached["reasoning"],
+                key_evidence=cached["key_evidence"],
+                missing_info=cached["missing_info"],
+            ))
+            await ctx.send(sender, AgentStatus(
+                agent_name=AGENT_NAME,
+                status="completed",
+                message=f"Cached: {cached['recommendation']} ({cached['confidence']:.0%} confidence)"
+            ))
+            return
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] LangCache check skipped: {e}")
+
     decision = decision_logic.run(
         market=temp_market,
         compressed_context=msg.compressed_context,
@@ -90,6 +115,33 @@ async def handle_decision_request(ctx: Context, sender: str, msg: DecisionReques
 
     ctx.logger.info(f"[{AGENT_NAME}] Decision: {decision.recommendation}")
     ctx.logger.info(f"Confidence: {decision.confidence:.2f}")
+
+    try:
+        from agent_memory_service import store_decision
+        store_decision(
+            market_id=msg.market_title,
+            decision=decision.recommendation,
+            confidence=decision.confidence,
+            reasoning=decision.reasoning,
+        )
+        ctx.logger.info(f"[{AGENT_NAME}] Stored decision in Agent Memory")
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] Agent Memory write skipped: {e}")
+
+    try:
+        import json
+        from langcache_service import cache_set
+        cache_set(msg.compressed_context, json.dumps({
+            "recommendation": decision.recommendation,
+            "confidence": decision.confidence,
+            "fair_probability": decision.fair_probability,
+            "reasoning": decision.reasoning,
+            "key_evidence": decision.key_evidence,
+            "missing_info": decision.missing_info,
+        }))
+        ctx.logger.info(f"[{AGENT_NAME}] Saved decision to LangCache")
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] LangCache save skipped: {e}")
 
     # Send response
     response = DecisionResponse(
