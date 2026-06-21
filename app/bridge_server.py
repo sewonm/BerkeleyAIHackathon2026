@@ -99,31 +99,31 @@ AGENT_META = {
 
 # Known ticker -> category (skip LLM routing for these)
 _TICKER_CATEGORY: dict[str, str] = {
-    "KXTEMPNYCH-26JUN2021-T86.99": "culture",
-    "FED-RATES-JUL26":             "financial",
-    "MOVIE-BESTPIC-26":            "culture",
-    "NBA-FINALS-EAST":             "sports",
+    "MARVEL-500M-26":  "culture",
+    "MESSI-RETIRE-26": "sports",
+    "FED-CUT-SEP26":   "financial",
+    "DJOKOVIC-GS-26":  "sports",
 }
 
 # ---------------------------------------------------------------------------
 # Hardcoded compression metrics for demo stability (keyed by ticker)
 # ---------------------------------------------------------------------------
 _DEMO_COMPRESSION: dict[str, dict] = {
-    "KXTEMPNYCH-26JUN2021-T86.99": {
-        "rawTokens": 5840, "compressedTokens": 2210,
-        "compressionRatio": 2.64, "keptChunks": 11, "droppedChunks": 18,
+    "MARVEL-500M-26": {
+        "rawTokens": 5340, "compressedTokens": 2080,
+        "compressionRatio": 2.57, "keptChunks": 10, "droppedChunks": 17,
     },
-    "FED-RATES-JUL26": {
-        "rawTokens": 6730, "compressedTokens": 2490,
-        "compressionRatio": 2.70, "keptChunks": 13, "droppedChunks": 22,
+    "MESSI-RETIRE-26": {
+        "rawTokens": 6820, "compressedTokens": 2530,
+        "compressionRatio": 2.70, "keptChunks": 13, "droppedChunks": 24,
     },
-    "MOVIE-BESTPIC-26": {
-        "rawTokens": 5120, "compressedTokens": 2050,
-        "compressionRatio": 2.50, "keptChunks": 9, "droppedChunks": 15,
+    "FED-CUT-SEP26": {
+        "rawTokens": 6140, "compressedTokens": 2360,
+        "compressionRatio": 2.60, "keptChunks": 11, "droppedChunks": 20,
     },
-    "NBA-FINALS-EAST": {
-        "rawTokens": 6280, "compressedTokens": 2310,
-        "compressionRatio": 2.72, "keptChunks": 12, "droppedChunks": 20,
+    "DJOKOVIC-GS-26": {
+        "rawTokens": 5620, "compressedTokens": 2140,
+        "compressionRatio": 2.63, "keptChunks": 10, "droppedChunks": 16,
     },
 }
 
