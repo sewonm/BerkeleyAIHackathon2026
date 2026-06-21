@@ -95,6 +95,21 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
     ctx.logger.info(f"Market: {msg.market_title}")
     ctx.logger.info(f"Category: {msg.category}")
 
+    try:
+        from redis_service import get_compressed
+        cached = get_compressed(msg.market_id)
+        if cached:
+            ctx.logger.info(f"[{AGENT_NAME}] Cache hit for {msg.market_id} — skipping pipeline")
+            await ctx.send(sender, AgentStatus(
+                agent_name=AGENT_NAME,
+                status="completed",
+                message=f"Returning cached result for {msg.market_id}"
+            ))
+            await ctx.send(sender, FinalAnalysisResult(**cached))
+            return
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] Redis cache check skipped: {e}")
+
     # Initialize pipeline state
     state = PipelineState(request_id=str(msg.msg_id), market_request=msg)
     state.requester_address = sender

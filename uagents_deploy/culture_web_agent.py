@@ -113,6 +113,14 @@ async def handle_evidence_request(ctx: Context, sender: str, msg: EvidenceReques
 
     ctx.logger.info(f"[{AGENT_NAME}] Collected {len(evidence_chunks)} evidence chunks")
 
+    try:
+        from redis_service import append_claims
+        market_id = msg.market_id or "UNKNOWN"
+        append_claims(market_id, [c.model_dump() for c in evidence_chunks])
+        ctx.logger.info(f"[{AGENT_NAME}] Wrote {len(evidence_chunks)} claims to Redis")
+    except Exception as e:
+        ctx.logger.warning(f"[{AGENT_NAME}] Redis write skipped: {e}")
+
     # Send response
     response = EvidenceResponse(
         request_id=msg.msg_id,
