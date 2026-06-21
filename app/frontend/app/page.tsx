@@ -61,7 +61,7 @@ export default function Home() {
                 <circle cx="7" cy="7" r="2" fill="black"/>
               </svg>
             </div>
-            <span className="text-white font-bold tracking-tight">SignalForge</span>
+            <button onClick={handleReset} className="text-white font-bold tracking-tight hover:text-teal-400 transition">SignalForge</button>
             <span className="text-zinc-600 text-xs hidden sm:block">by Quorum</span>
           </div>
 

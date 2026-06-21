@@ -14,7 +14,7 @@ from app.schemas.execution import TradeDecision, ExecutionResult
 
 
 MIN_CONFIDENCE = float(os.getenv("EXECUTOR_MIN_CONFIDENCE", "0.70"))
-MIN_EDGE = float(os.getenv("EXECUTOR_MIN_EDGE", "0.05"))
+MIN_EDGE = float(os.getenv("EXECUTOR_MIN_EDGE", "0.03"))
 MAX_ORDER_DOLLARS = float(os.getenv("EXECUTOR_MAX_ORDER_DOLLARS", "5.00"))
 MAX_CONTRACTS = int(os.getenv("EXECUTOR_MAX_CONTRACTS", "10"))
 
