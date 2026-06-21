@@ -1,0 +1,36 @@
+# Core dependencies
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+
+# Terminal UI
+rich>=13.0.0
+
+# Token counting
+tiktoken>=0.5.0
+
+# Fetch.ai uAgents (Agentverse deployment)
+uagents>=0.12.0
+uagents-core>=0.1.0
+
+# Claude API (decision agent + claim extraction)
+anthropic>=0.18.0
+
+# Redis — agent memory, vector search, streams
+redis[hiredis]>=5.0.5
+
+# Semantic embeddings for Redis vector similarity in ConsensusClusterer
+# Falls back to Jaccard similarity if not installed
+sentence-transformers>=2.7.0
+
+# Browserbase web research agent
+browserbase>=1.11.0
+
+# FastAPI backend
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
+# HTTP calls between agents
+requests>=2.31.0
