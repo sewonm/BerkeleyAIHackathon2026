@@ -174,3 +174,30 @@ class Acknowledgement(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     agent_name: str
     acknowledged: bool = True
+
+
+class ExecuteTradeRequest(BaseModel):
+    """Request sent from orchestrator to Kalshi executor agent."""
+    msg_id: UUID = Field(default_factory=uuid4)
+    timestamp: datetime = Field(default_factory=datetime.now)
+    market_id: str
+    market_title: str
+    action: str                  # YES | NO | HOLD
+    side: str                    # yes | no
+    quantity: int = 1
+    fair_probability: float
+    confidence: float
+
+
+class ExecuteTradeResponse(BaseModel):
+    """Response from Kalshi executor agent."""
+    msg_id: UUID = Field(default_factory=uuid4)
+    timestamp: datetime = Field(default_factory=datetime.now)
+    request_id: UUID
+    approved: bool
+    action_taken: str
+    reason: str
+    order_payload: Optional[dict] = None
+    kalshi_response: Optional[dict] = None
+    estimated_contracts: Optional[int] = None
+    estimated_cost_dollars: Optional[float] = None

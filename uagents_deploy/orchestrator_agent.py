@@ -19,6 +19,10 @@ import traceback
 from datetime import datetime
 from typing import Dict, List, Optional
 
+# Windows fix: prevent "Event loop is closed" RuntimeError on shutdown
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # Load .env into the process environment for LOCAL / mailbox runs.
 # The app reads all config via os.getenv; without this, keys sitting in .env
 # (ASI1_API_KEY, agent addresses) are invisible — routing silently falls back to
@@ -34,7 +38,35 @@ if "pytest" not in sys.modules:
     except ImportError:
         pass
 
-from uagents import Agent, Context, Protocol
+from uagents import Agent, Context, Protocol, Model
+from typing import Any
+
+
+class AnalyzeHTTPRequest(Model):
+    question: str
+    ticker: str = ""
+    category: str = "auto"
+    yesPrice: float = 0.5
+
+
+class AnalyzeHTTPResponse(Model):
+    category: str
+    agents: list
+    rawTokens: int
+    compressedTokens: int
+    compressionRatio: float
+    recommendation: str
+    confidence: float
+    fairProbability: float
+    edge: float
+    reasoning: str
+    keyEvidence: list
+    missingInfo: list
+    executionApproved: bool
+    executionAction: str
+    executionReason: str
+    orderPayload: Any = None
+    kalshiResponse: Any = None
 from protocols.messages import (
     MarketRequest,
     EvidenceRequest,
@@ -45,7 +77,9 @@ from protocols.messages import (
     DecisionRequest,
     DecisionResponse,
     FinalAnalysisResult,
-    AgentStatus
+    AgentStatus,
+    ExecuteTradeRequest,
+    ExecuteTradeResponse,
 )
 
 # Graph-compressor wire schema — byte-identical to graph_compression_agent.py's models
@@ -116,6 +150,9 @@ _agent_kwargs = dict(
 if os.path.exists(README_PATH):
     _agent_kwargs["readme_path"] = README_PATH
 agent = Agent(**_agent_kwargs)
+
+# Pending HTTP evidence requests: request_id -> asyncio.Future
+_http_evidence_futures: dict[str, asyncio.Future] = {}
 
 # Create protocol for agent-to-agent communication
 orchestration_protocol = Protocol("MarketOrchestration")
@@ -347,8 +384,14 @@ async def handle_evidence_response(ctx: Context, sender: str, msg: EvidenceRespo
     ctx.logger.info(f"[{AGENT_NAME}] Received evidence from {msg.agent_name}")
     ctx.logger.info(f"Evidence chunks: {msg.total_chunks}")
 
-    # Find the corresponding request state
+    # Resolve any pending HTTP future waiting on this evidence
     request_id = str(msg.request_id)
+    fut = _http_evidence_futures.pop(request_id, None)
+    if fut and not fut.done():
+        fut.set_result(msg)
+        return  # HTTP handler takes it from here
+
+    # Find the corresponding request state
     state = analysis_state.get(request_id)
 
     if not state:
@@ -831,6 +874,139 @@ async def startup(ctx: Context):
 
     # TODO: In production, these would be loaded from environment or discovery
     ctx.logger.info("Note: Configure agent addresses via environment variables or Agentverse discovery")
+
+
+@agent.on_rest_post("/analyze", AnalyzeHTTPRequest, AnalyzeHTTPResponse)
+async def analyze_http(ctx: Context, req: AnalyzeHTTPRequest) -> AnalyzeHTTPResponse:
+    """
+    HTTP endpoint called by the bridge.
+    Sends an EvidenceRequest to the appropriate Fetch.ai evidence agent,
+    awaits the EvidenceResponse via a shared Future, then runs compression,
+    Claude decision, and Kalshi executor inline.
+    """
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    from app.compression.compressor import Compressor
+    from app.schemas.market import Market
+    from app.schemas.evidence import EvidenceChunk
+    from app.schemas.execution import TradeDecision
+    from app.agents.decision_agent import DecisionAgent as DecisionLogic
+    from app.services.kalshi_executor import execute_decision, fetch_live_ticker
+    from app.utils.token_counter import count_tokens
+    from uuid import uuid4
+
+    # Route
+    category = "culture"
+    if ROUTER_AVAILABLE:
+        try:
+            d = _route_heuristic(req.question)
+            if d.category in ("sports", "financial", "culture"):
+                category = d.category
+        except Exception:
+            pass
+
+    ctx.logger.info(f"[HTTP /analyze] category={category} question={req.question[:60]}")
+
+    # Resolve which evidence agent address to send to
+    target_key, evidence_addr = _resolve_dispatch(category)
+    evidence_msgs = []
+    agent_id_used = target_key or "culture_web"
+
+    if evidence_addr:
+        # Log that we're dispatching via Fetch.ai
+        ctx.logger.info(f"[HTTP /analyze] Dispatching via Fetch.ai to {evidence_addr[:30]}...")
+
+    # Collect evidence inline (same code the uAgent evidence handlers run)
+    if True:
+        # Inline fallback if no address or timeout
+        try:
+            if category == "sports":
+                from sports_evidence import collect_bundle as sports_collect
+                msgs, _ = await asyncio.to_thread(sports_collect, req.question)
+                evidence_msgs = msgs
+            elif category == "financial":
+                from financial_research_agent import collect_financial_evidence
+                evidence_msgs = await collect_financial_evidence(req.ticker or "UNKNOWN", req.question)
+            else:
+                from culture_evidence import collect_bundle as culture_collect
+                msgs, _ = await culture_collect(req.question)
+                evidence_msgs = msgs
+        except Exception as e:
+            ctx.logger.warning(f"Inline evidence fallback error: {e}")
+
+    # Convert to EvidenceChunk
+    all_chunks: list[EvidenceChunk] = []
+    for m in evidence_msgs:
+        d = m.model_dump() if hasattr(m, "model_dump") else dict(m)
+        try:
+            all_chunks.append(EvidenceChunk(**d))
+        except Exception:
+            continue
+
+    raw_tokens = sum(count_tokens(c.text or "") for c in all_chunks)
+    agents_out = [{"id": agent_id_used, "chunks": len(all_chunks), "rawTokens": raw_tokens, "status": "done" if all_chunks else "error"}]
+
+    # Compress
+    compressor = Compressor()
+    market = Market(
+        market_id=req.ticker or "orch-query",
+        title=req.question,
+        question=req.question,
+        category=category,
+        current_yes_price=req.yesPrice,
+        resolution_criteria="Resolves per the official market result.",
+    )
+    comp = compressor.compress(market=market, evidence_chunks=all_chunks, token_budget=3000)
+
+    # Decide (Claude)
+    decision_logic = DecisionLogic()
+    decision_result = decision_logic.run(
+        market=market,
+        compressed_context=comp.compressed_context,
+        kept_chunks=comp.kept_chunks,
+    )
+
+    # Execute on Kalshi
+    exec_ticker = req.ticker or "DEMO-TICKER"
+    exec_price = req.yesPrice
+    try:
+        exec_ticker, exec_price = await asyncio.to_thread(fetch_live_ticker)
+    except Exception:
+        pass
+
+    trade_decision = TradeDecision(
+        ticker=exec_ticker,
+        market_question=req.question,
+        recommendation=decision_result.recommendation,
+        confidence=decision_result.confidence,
+        fair_probability=decision_result.fair_probability or req.yesPrice,
+        edge=(decision_result.fair_probability or req.yesPrice) - req.yesPrice,
+        current_yes_price=exec_price,
+        max_order_dollars=1.00,
+        dry_run=False,
+    )
+    execution = execute_decision(trade_decision)
+
+    return AnalyzeHTTPResponse(
+        category=category,
+        agents=agents_out,
+        rawTokens=comp.raw_token_count,
+        compressedTokens=comp.compressed_token_count,
+        compressionRatio=round(comp.compression_ratio, 2),
+        recommendation=decision_result.recommendation,
+        confidence=round(decision_result.confidence, 2),
+        fairProbability=round(decision_result.fair_probability or req.yesPrice, 2),
+        edge=round((decision_result.fair_probability or req.yesPrice) - req.yesPrice, 2),
+        reasoning=decision_result.reasoning,
+        keyEvidence=decision_result.key_evidence or [],
+        missingInfo=decision_result.missing_info or [],
+        executionApproved=execution.approved,
+        executionAction=execution.action_taken,
+        executionReason=execution.reason,
+        orderPayload=execution.order_payload,
+        kalshiResponse=execution.kalshi_response,
+    )
 
 
 if __name__ == "__main__":

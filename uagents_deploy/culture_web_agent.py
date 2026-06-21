@@ -1,163 +1,200 @@
 """
-CultureWebAgent - Standalone uAgent for culture/entertainment evidence collection.
+CultureWebAgent — Deployed Fetch.ai uAgent for culture/entertainment web evidence.
 
-This agent can be deployed to Agentverse and will respond to evidence requests
-by collecting culture/web-related information.
+Address is derived from CULTURE_WEB_AGENT_SEED — keep this seed constant forever.
+A fixed seed produces a byte-for-byte identical agent1q… address across every restart.
 
-For MVP: Reads from local sample file
-For Production: Would integrate with Browserbase for live web scraping
+Dual-protocol agent (same shape as sports_video_agent.py):
+  1. Chat Protocol v0.3.0 (ASI:One discoverable via publish_manifest=True)
+     — receives a ChatMessage with a market question, ACKs immediately, then replies
+       with a human-readable evidence summary + the full JSON bundle.
+  2. Custom EvidenceCollection protocol (orchestrator_agent.py compat)
+     — receives EvidenceRequest, returns EvidenceResponse with the same bundle.
+
+LIVE DATA: fully self-contained (no app.services.* imports). The web layer
+(Serper.dev + Browserbase/DuckDuckGo + httpx fallback) lives in culture_evidence.py.
+The handler ACKs first, then awaits the async collection with a hard timeout. If no
+web provider is configured / available, it degrades to a tiny stub bundle — the demo
+NEVER returns nothing.
+
+Required secrets (set in the Agentverse dashboard or local .env):
+    SERPER_API_KEY        — Serper.dev key for Google search results (preferred)
+    BROWSERBASE_API_KEY   — Browserbase key (DuckDuckGo HTML + page render fallback)
+Optional:
+    CULTURE_WEB_AGENT_SEED — deterministic seed for a stable agent address
+
+DEPLOY AS A MAILBOX AGENT (mailbox=True): run this file locally
+    python uagents_deploy/culture_web_agent.py
+then open the Agent Inspector link printed in the terminal -> Connect -> Mailbox ->
+Finish. That connects it to Agentverse and makes it discoverable on ASI:One.
 """
 
 import os
+import asyncio
+
+# Load .env (repo root) so SERPER_API_KEY / BROWSERBASE_API_KEY / CULTURE_WEB_AGENT_SEED
+# are available when the agent runs locally — must happen before any os.getenv below.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+except Exception:
+    pass
+
 from uagents import Agent, Context, Protocol
 from protocols.messages import (
     EvidenceRequest,
     EvidenceResponse,
-    EvidenceChunkMsg,
-    AgentStatus
+)
+from uagents_core.contrib.protocols.chat import (
+    ChatMessage,
+    ChatAcknowledgement,
+    TextContent,
+    chat_protocol_spec,
 )
 
-# Agent configuration
-AGENT_NAME = "culture_web_agent"
-AGENT_SEED = "culture_web_agent_seed_phrase_change_in_production"
-AGENT_PORT = 8001
-AGENT_MAILBOX = True  # Enable for Agentverse deployment
+# Bundle-building logic lives in culture_evidence.py (importable + unit-testable
+# without constructing a uAgent). Self-contained web layer — no app/ imports.
+from culture_evidence import (
+    collect_bundle,
+    build_stub_bundle,
+    format_chat_reply,
+    LIVE_AVAILABLE,
+    IMPORT_ERR as _IMPORT_ERR,
+)
 
-# Create the agent
-agent = Agent(
+# ---------------------------------------------------------------------------
+# Module constants
+# ---------------------------------------------------------------------------
+
+AGENT_NAME = "culture_web_agent"
+# Address is derived from CULTURE_WEB_AGENT_SEED — keep this seed constant forever.
+AGENT_SEED = os.getenv("CULTURE_WEB_AGENT_SEED", "quorum-culture-web-agent-phase1-seed-v1")
+AGENT_PORT = 8001
+AGENT_MAILBOX = True
+AGENT_DESCRIPTION = (
+    "Quorum Culture/Web Agent — given a Kalshi culture/entertainment market question, "
+    "searches the live web (Serper + Browserbase) and returns a raw EvidenceChunk "
+    "bundle of headlines, snippets and page text for a downstream compression engine."
+)
+COLLECT_TIMEOUT = float(os.getenv("CULTURE_AGENT_COLLECT_TIMEOUT", "30"))
+
+# README lives next to this file. publish_agent_details=True publishes the profile
+# (name/description/README) to Agentverse; the marketplace tags (innovationlab,
+# hackathon) are read from the shields.io badges inside this README.
+README_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CULTURE_WEB_README.md")
+
+_agent_kwargs = dict(
     name=AGENT_NAME,
     seed=AGENT_SEED,
     port=AGENT_PORT,
     mailbox=AGENT_MAILBOX,
+    description=AGENT_DESCRIPTION,
+    publish_agent_details=True,  # publish profile + README -> discoverable on Agentverse/ASI:One
 )
+if os.path.exists(README_PATH):
+    _agent_kwargs["readme_path"] = README_PATH
 
-# Create protocol for evidence collection
-evidence_protocol = Protocol("EvidenceCollection")
+agent = Agent(**_agent_kwargs)
 
 
-def collect_culture_evidence(market_question: str, protected_terms: list) -> list:
-    """
-    Collect culture/entertainment evidence.
+# ---------------------------------------------------------------------------
+# Protocol 1: Chat Protocol v0.3.0  (ASI:One discoverable)
+# ---------------------------------------------------------------------------
 
-    For MVP: Reads from local sample file
-    For Production: Would use Browserbase to scrape live sources
+chat_proto = Protocol(spec=chat_protocol_spec)
 
-    Args:
-        market_question: The market question to research
-        protected_terms: Important terms to look for
 
-    Returns:
-        List of evidence chunks
-    """
-    # For MVP: Read from local sample file
-    sample_file_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "examples",
-        "raw_context",
-        "culture_web_context.txt"
+@chat_proto.on_message(ChatMessage)
+async def handle_chat(ctx: Context, sender: str, msg: ChatMessage):
+    """ACK immediately, collect the bundle, then reply with summary + JSON."""
+    # ACK FIRST — required by the Chat Protocol spec and keeps latency low.
+    await ctx.send(sender, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
+
+    try:
+        question = msg.text()
+    except Exception:
+        question = ""
+
+    try:
+        # async web collection with a hard timeout so the handler never hangs
+        msgs, meta = await asyncio.wait_for(collect_bundle(question), timeout=COLLECT_TIMEOUT)
+    except Exception as exc:
+        ctx.logger.warning(f"[{AGENT_NAME}] collection failed ({exc}); using stub")
+        msgs, meta = build_stub_bundle(question), {"source": "stub", "providers": []}
+
+    reply = format_chat_reply(question, msgs, meta)
+    await ctx.send(sender, ChatMessage(content=[TextContent(text=reply)]))
+
+    ctx.logger.info(
+        f"[{AGENT_NAME}] Chat reply to {sender} — {len(msgs)} chunks "
+        f"(source={meta.get('source')}, providers={meta.get('providers')})"
     )
 
-    if not os.path.exists(sample_file_path):
-        print(f"[{AGENT_NAME}] Warning: Sample file not found at {sample_file_path}")
-        return []
 
-    with open(sample_file_path, 'r') as f:
-        raw_text = f.read()
+@chat_proto.on_message(ChatAcknowledgement)
+async def handle_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
+    ctx.logger.info(f"[{AGENT_NAME}] ACK from {sender} for msg {msg.acknowledged_msg_id}")
 
-    # Simple chunking by paragraphs
-    paragraphs = [p.strip() for p in raw_text.split('\n\n') if p.strip()]
 
-    # Convert to evidence chunks
-    evidence_chunks = []
-    for para in paragraphs[:50]:  # Limit to 50 chunks for demo
-        if len(para.split()) < 10:  # Skip very short paragraphs
-            continue
+# publish_manifest=True makes this agent discoverable on ASI:One
+agent.include(chat_proto, publish_manifest=True)
 
-        chunk = EvidenceChunkMsg(
-            source_type="culture_web",
-            text=para,
-            source_url="local://examples/raw_context/culture_web_context.txt",
-            confidence=0.8,
-            metadata={"agent": AGENT_NAME, "is_sample_data": True}
-        )
-        evidence_chunks.append(chunk)
 
-    return evidence_chunks
+# ---------------------------------------------------------------------------
+# Protocol 2: Custom evidence protocol  (orchestrator_agent.py compat)
+# ---------------------------------------------------------------------------
+
+evidence_protocol = Protocol("EvidenceCollection")
 
 
 @evidence_protocol.on_message(model=EvidenceRequest)
 async def handle_evidence_request(ctx: Context, sender: str, msg: EvidenceRequest):
-    """
-    Handle incoming evidence collection requests.
-
-    Args:
-        ctx: Agent context
-        sender: Address of requesting agent
-        msg: Evidence request message
-    """
-    ctx.logger.info(f"[{AGENT_NAME}] Received evidence request from {sender}")
-    ctx.logger.info(f"Market question: {msg.market_question}")
-
-    # Send status update
-    await ctx.send(sender, AgentStatus(
-        agent_name=AGENT_NAME,
-        status="processing",
-        message=f"Collecting culture/web evidence for: {msg.market_question}"
-    ))
-
-    # Collect evidence
-    evidence_chunks = collect_culture_evidence(
-        market_question=msg.market_question,
-        protected_terms=msg.protected_terms
+    """Return a real EvidenceResponse for the orchestrator pipeline."""
+    ctx.logger.info(
+        f"[{AGENT_NAME}] EvidenceRequest from {sender} — {msg.market_question[:60]}"
     )
 
-    ctx.logger.info(f"[{AGENT_NAME}] Collected {len(evidence_chunks)} evidence chunks")
-
     try:
-        from redis_service import append_claims
-        market_id = msg.market_id or "UNKNOWN"
-        append_claims(market_id, [c.model_dump() for c in evidence_chunks])
-        ctx.logger.info(f"[{AGENT_NAME}] Wrote {len(evidence_chunks)} claims to Redis")
-    except Exception as e:
-        ctx.logger.warning(f"[{AGENT_NAME}] Redis write skipped: {e}")
+        msgs, meta = await asyncio.wait_for(
+            collect_bundle(msg.market_question, msg.category, msg.protected_terms),
+            timeout=COLLECT_TIMEOUT,
+        )
+    except Exception as exc:
+        ctx.logger.warning(f"[{AGENT_NAME}] collection failed ({exc}); using stub")
+        msgs = build_stub_bundle(msg.market_question)
 
-    try:
-        from agent_memory_service import store_evidence
-        market_id = msg.market_id or "UNKNOWN"
-        for chunk in evidence_chunks:
-            store_evidence(market_id, AGENT_NAME, chunk.text)
-        ctx.logger.info(f"[{AGENT_NAME}] Stored {len(evidence_chunks)} events in Agent Memory")
-    except Exception as e:
-        ctx.logger.warning(f"[{AGENT_NAME}] Agent Memory write skipped: {e}")
-
-    # Send response
-    response = EvidenceResponse(
-        request_id=msg.msg_id,
-        agent_name=AGENT_NAME,
-        evidence_chunks=evidence_chunks,
-        total_chunks=len(evidence_chunks)
+    await ctx.send(
+        sender,
+        EvidenceResponse(
+            request_id=msg.msg_id,
+            agent_name=AGENT_NAME,
+            evidence_chunks=msgs,
+            total_chunks=len(msgs),
+        ),
     )
-
-    await ctx.send(sender, response)
-
-    # Send completion status
-    await ctx.send(sender, AgentStatus(
-        agent_name=AGENT_NAME,
-        status="completed",
-        message=f"Sent {len(evidence_chunks)} evidence chunks"
-    ))
+    ctx.logger.info(f"[{AGENT_NAME}] EvidenceResponse sent — {len(msgs)} chunks")
 
 
-# Include the protocol with the agent
 agent.include(evidence_protocol)
 
 
-# Startup message
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
+
 @agent.on_event("startup")
 async def startup(ctx: Context):
-    ctx.logger.info(f"[{AGENT_NAME}] Agent started!")
-    ctx.logger.info(f"Address: {agent.address}")
-    ctx.logger.info(f"Ready to collect culture/web evidence")
+    ctx.logger.info(f"[{AGENT_NAME}] Agent started — stable address: {agent.address}")
+    ctx.logger.info(
+        f"[{AGENT_NAME}] Chat Protocol v{chat_proto.spec.version} active (publish_manifest=True)"
+    )
+    if LIVE_AVAILABLE:
+        ctx.logger.info(f"[{AGENT_NAME}] LIVE web layer ready (Serper + Browserbase)")
+    else:
+        ctx.logger.warning(
+            f"[{AGENT_NAME}] no web provider ({_IMPORT_ERR}); serving STUB bundle only"
+        )
 
 
 if __name__ == "__main__":

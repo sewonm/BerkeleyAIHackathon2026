@@ -29,6 +29,11 @@ class CompressionResult(BaseModel):
         description="Protected terms used during compression"
     )
 
+    cache_hit: bool = Field(
+        default=False,
+        description="True if this result was served from Redis cache"
+    )
+
     class Config:
         json_schema_extra = {
             "example": {

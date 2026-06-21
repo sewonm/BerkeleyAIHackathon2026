@@ -29,7 +29,12 @@ Finish. That connects it to Agentverse and makes it discoverable on ASI:One.
 """
 
 import os
+import sys
 import asyncio
+
+# Windows fix: prevent "Event loop is closed" RuntimeError on shutdown
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Load .env (repo root) so BROWSERBASE_API_KEY / SPORTS_VIDEO_AGENT_SEED / etc. are
 # available when the agent runs locally — must happen before any os.getenv below.

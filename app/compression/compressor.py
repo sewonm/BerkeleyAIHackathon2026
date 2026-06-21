@@ -1,6 +1,9 @@
 """Main compression pipeline"""
 
-from typing import List
+import hashlib
+import json
+import os
+from typing import List, Optional
 
 from app.schemas.market import Market
 from app.schemas.evidence import EvidenceChunk
@@ -17,16 +20,62 @@ class Compressor:
     Compresses evidence chunks to fit within a token budget.
 
     Process:
-    1. Extract protected terms from market
-    2. Score each chunk for relevance
-    3. Deduplicate near-identical chunks
-    4. Sort chunks by score
-    5. Keep chunks until token budget is reached
-    6. Return compression result with metrics
+    1. Check Redis cache — return instantly on hit
+    2. Extract protected terms from market
+    3. Score each chunk for relevance
+    4. Deduplicate near-identical chunks
+    5. Sort chunks by score
+    6. Keep chunks until token budget is reached
+    7. Write result to Redis cache + market key
     """
 
     def __init__(self):
         self.name = "Compressor"
+
+    # ── Redis helpers ─────────────────────────────────────────────────────────
+
+    def _redis(self):
+        try:
+            import redis
+            url = os.getenv("REDIS_URL", "redis://localhost:6379")
+            r = redis.from_url(url, decode_responses=True)
+            r.ping()
+            return r
+        except Exception:
+            return None
+
+    def _cache_key(self, market_id: str, question: str) -> str:
+        question_hash = hashlib.md5(question.lower().strip().encode()).hexdigest()[:12]
+        return f"compression:cache:{market_id}:{question_hash}"
+
+    def _read_cache(self, market_id: str, question: str) -> Optional[CompressionResult]:
+        try:
+            r = self._redis()
+            if r is None:
+                return None
+            raw = r.get(self._cache_key(market_id, question))
+            if raw:
+                print(f"[Compressor] Redis cache HIT for {market_id}")
+                data = json.loads(raw)
+                data["cache_hit"] = True
+                return CompressionResult(**data)
+        except Exception:
+            pass
+        return None
+
+    def _write_cache(self, market_id: str, question: str, result: CompressionResult):
+        try:
+            r = self._redis()
+            if r is None:
+                return
+            payload = json.dumps(result.model_dump())
+            r.setex(self._cache_key(market_id, question), 3600, payload)
+            r.set(f"market:{market_id}:compressed", payload)
+            print(f"[Compressor] Redis cache WRITE for {market_id}")
+        except Exception as e:
+            print(f"[Compressor] Redis write skipped: {e}")
+
+    # ── Main compress ─────────────────────────────────────────────────────────
 
     def compress(
         self,
@@ -55,6 +104,11 @@ class Compressor:
                 dropped_chunks=[],
                 protected_terms=[]
             )
+
+        # Step 0: Redis cache check
+        cached = self._read_cache(market.market_id, market.question)
+        if cached is not None:
+            return cached
 
         # Step 1: Extract protected terms
         protected_terms = extract_protected_terms(market)
@@ -118,7 +172,7 @@ class Compressor:
         compressed_token_count = count_tokens(compressed_context)
         compression_ratio = calculate_compression_ratio(raw_token_count, compressed_token_count)
 
-        return CompressionResult(
+        result = CompressionResult(
             raw_token_count=raw_token_count,
             compressed_token_count=compressed_token_count,
             compression_ratio=round(compression_ratio, 2),
@@ -127,3 +181,5 @@ class Compressor:
             dropped_chunks=dropped_chunks,
             protected_terms=protected_terms
         )
+        self._write_cache(market.market_id, market.question, result)
+        return result
