@@ -54,8 +54,8 @@ AGENT_METADATA = {
     },
     "sports_video_agent": {
         "name": "Sports Video Evidence Agent",
-        "description": "Collects evidence from sports videos and transcripts",
-        "status": "PLACEHOLDER",
+        "description": "Returns a stub sports EvidenceChunk bundle (Phase 1)",
+        "status": "IMPLEMENTED",
         "port": 8004,
     },
     "politics_news_agent": {
