@@ -14,9 +14,26 @@ Deployable to Agentverse as the public-facing interface.
 import asyncio
 import json
 import os
+import sys
 import traceback
 from datetime import datetime
 from typing import Dict, List, Optional
+
+# Load .env into the process environment for LOCAL / mailbox runs.
+# The app reads all config via os.getenv; without this, keys sitting in .env
+# (ASI1_API_KEY, agent addresses) are invisible — routing silently falls back to
+# the heuristic tier and the startup log prints "LLM DISABLED".
+# Skipped under pytest: importing this module must not leak real .env secrets into
+# the test process (tests assert keyless/heuristic behavior with a clean env).
+# Guarded so a missing python-dotenv (e.g. an Agentverse-hosted runtime) never
+# crashes import.
+if "pytest" not in sys.modules:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()  # walks up from this file to repo-root .env; no-op if absent
+    except ImportError:
+        pass
+
 from uagents import Agent, Context, Protocol
 from protocols.messages import (
     MarketRequest,
@@ -57,7 +74,10 @@ except Exception as _router_err:   # never crash the agent if router import fail
 
 # Agent configuration
 AGENT_NAME = "orchestrator_agent"
-AGENT_SEED = "orchestrator_agent_seed_phrase_change_in_production"
+# Address is derived from AGENT_SEED — keep this seed constant + UNIQUE (a shared
+# placeholder collides on Agentverse: "seed phrase already used by another user").
+# Real value lives in .env (gitignored); the default is only a local fallback.
+AGENT_SEED = os.getenv("ORCHESTRATOR_AGENT_SEED", "quorum-orchestrator-agent-seed-v1")
 AGENT_PORT = 8000
 AGENT_MAILBOX = True
 
