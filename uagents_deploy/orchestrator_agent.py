@@ -71,12 +71,17 @@ if CHAT_PROTOCOL_AVAILABLE:
 AGENT_ADDRESSES = {
     "culture_web": os.getenv("CULTURE_WEB_AGENT_ADDRESS"),
     "financial_research": os.getenv("FINANCIAL_RESEARCH_AGENT_ADDRESS"),
+    "sports_video": os.getenv("SPORTS_VIDEO_AGENT_ADDRESS"),
     "compression": os.getenv("COMPRESSION_AGENT_ADDRESS"),
     "decision": os.getenv("DECISION_AGENT_ADDRESS"),
+    "kalshi": os.getenv("KALSHI_AGENT_ADDRESS"),
 }
 
 # State storage for async coordination
 analysis_state: Dict[str, dict] = {}
+
+# State storage for pending trade confirmations
+pending_confirmations: Dict[str, dict] = {}  # sender_address -> {decision_response, market_request, timestamp}
 
 
 class PipelineState:
@@ -140,6 +145,7 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
     dispatch = [
         ("culture_web", "culture_web_agent"),
         ("financial_research", "financial_research_agent"),
+        ("sports_video", "sports_video_agent"),
     ]
 
     for addr_key, agent_label in dispatch:
@@ -245,7 +251,7 @@ async def handle_compression_response(ctx: Context, sender: str, msg: Compressio
 @orchestration_protocol.on_message(model=DecisionResponse)
 async def handle_decision_response(ctx: Context, sender: str, msg: DecisionResponse):
     """
-    Handle decision response and send final result to user.
+    Handle decision response and send confirmation prompt to user.
 
     Args:
         ctx: Agent context
@@ -268,49 +274,119 @@ async def handle_decision_response(ctx: Context, sender: str, msg: DecisionRespo
     # Calculate processing time
     processing_time = (datetime.now() - state.start_time).total_seconds()
 
-    # Build final result
-    final_result = FinalAnalysisResult(
-        market_title="Market Analysis",  # Would use actual market title
-        raw_token_count=state.compression_response.raw_token_count if state.compression_response else 0,
-        compressed_token_count=state.compression_response.compressed_token_count if state.compression_response else 0,
-        compression_ratio=state.compression_response.compression_ratio if state.compression_response else 0.0,
-        recommendation=msg.recommendation,
-        confidence=msg.confidence,
-        fair_probability=msg.fair_probability,
-        reasoning=msg.reasoning,
-        key_evidence=msg.key_evidence,
-        missing_info=msg.missing_info,
-        agents_used=state.agents_used,
-        processing_time_seconds=processing_time
-    )
-
-    # Send final result to requester
+    # Store pending confirmation
     if state.requester_address:
-        ctx.logger.info(f"[{AGENT_NAME}] Sending final result to requester")
-        await ctx.send(state.requester_address, final_result)
+        pending_confirmations[state.requester_address] = {
+            "decision_response": msg,
+            "market_request": state.market_request,
+            "compression_response": state.compression_response,
+            "agents_used": state.agents_used,
+            "processing_time": processing_time,
+            "timestamp": datetime.now()
+        }
 
-    # Send completion status
-    await ctx.send(state.requester_address, AgentStatus(
-        agent_name=AGENT_NAME,
-        status="completed",
-        message=f"Analysis complete: {msg.recommendation} ({msg.confidence:.0%} confidence)"
-    ))
+        # Send decision result with confirmation prompt via chat
+        if CHAT_PROTOCOL_AVAILABLE:
+            evidence_summary = "\n".join([f"• {e}" for e in msg.key_evidence[:5]])
+            missing_info_text = ""
+            if msg.missing_info:
+                missing_info_text = f"\n\n**Missing Information:**\n" + "\n".join([f"• {m}" for m in msg.missing_info[:3]])
 
-    # Clean up state
-    del analysis_state[request_id]
+            decision_text = f"""📊 **Trading Decision Analysis Complete**
+
+**Question:** {state.market_request.market_question}
+
+**Recommendation:** **{msg.recommendation}**
+**Confidence:** {msg.confidence:.1%}
+**Fair Probability:** {msg.fair_probability:.1%}
+
+**Reasoning:**
+{msg.reasoning}
+
+**Key Supporting Evidence:**
+{evidence_summary}
+{missing_info_text}
+
+**Analysis Metrics:**
+• Agents used: {', '.join(state.agents_used)}
+• Processing time: {processing_time:.1f}s
+• Evidence compressed: {state.compression_response.compression_ratio:.1f}x ratio
+
+---
+
+⚠️ **Do you want to execute this trade on Kalshi?**
+
+Reply **'yes'** to execute the trade or **'no'** to cancel.
+
+_(This confirmation will expire in 5 minutes)_
+"""
+
+            confirmation_msg = ChatMessage(
+                content=[TextContent(text=decision_text)]
+            )
+            await ctx.send(state.requester_address, confirmation_msg)
+            ctx.logger.info(f"[{AGENT_NAME}] Sent confirmation prompt to {state.requester_address}")
+
+        # Also send status update
+        await ctx.send(state.requester_address, AgentStatus(
+            agent_name=AGENT_NAME,
+            status="awaiting_confirmation",
+            message=f"Decision ready: {msg.recommendation} ({msg.confidence:.0%} confidence) - awaiting your confirmation"
+        ))
+
+    # Don't clean up state yet - keep it for confirmation handling
+    # Will clean up after user confirms/cancels or timeout
 
 
 # ============================================================================
 # ASI:ONE CHAT PROTOCOL HANDLER (for Agentverse/DeltaV users)
 # ============================================================================
 
+def detect_category(question: str) -> str:
+    """Detect market category from natural language question."""
+    question_lower = question.lower()
+
+    # Sports keywords
+    sports_keywords = [
+        "win", "beat", "defeat", "champion", "game", "match", "score", "team",
+        "nba", "nfl", "mlb", "nhl", "fifa", "world cup", "olympics", "super bowl",
+        "lakers", "celtics", "chiefs", "patriots", "yankees", "dodgers",
+        "soccer", "football", "basketball", "baseball", "hockey", "tennis"
+    ]
+
+    # Financial keywords
+    financial_keywords = [
+        "bitcoin", "btc", "eth", "ethereum", "crypto", "stock", "sp500", "s&p",
+        "price", "dollar", "usd", "$", "market", "trading", "nasdaq", "dow"
+    ]
+
+    # Check for sports
+    if any(keyword in question_lower for keyword in sports_keywords):
+        return "sports"
+
+    # Check for financial
+    if any(keyword in question_lower for keyword in financial_keywords):
+        return "financial"
+
+    # Default to culture
+    return "culture"
+
+
 if CHAT_PROTOCOL_AVAILABLE:
     @chat_protocol.on_message(model=ChatMessage)
     async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         """
-        Handle chat messages from Agentverse chat interface.
+        Handle natural language questions from users.
 
-        Accepts JSON-formatted MarketRequest or provides help for natural language queries.
+        Example: "will france win the worldcup 2026"
+
+        Flow:
+        1. Parse natural language question
+        2. Route to appropriate evidence agents (sports, financial, etc.)
+        3. Compress evidence
+        4. Get decision recommendation
+        5. Ask user for trade confirmation
+        6. Execute on Kalshi if confirmed
         """
         ctx.logger.info(f"[{AGENT_NAME}] Received chat message from {sender}")
 
@@ -324,113 +400,160 @@ if CHAT_PROTOCOL_AVAILABLE:
                 if isinstance(content, TextContent):
                     user_text += content.text
 
-            ctx.logger.info(f"[{AGENT_NAME}] User query: {user_text[:200]}...")
+            user_text = user_text.strip()
+            ctx.logger.info(f"[{AGENT_NAME}] User question: {user_text}")
 
-            # Try to parse as JSON first
-            try:
-                request_data = json.loads(user_text)
+            # Check if this is a confirmation response (yes/no)
+            if sender in pending_confirmations:
+                user_response = user_text.lower()
 
-                # Build MarketRequest from JSON
-                market_request = MarketRequest(
-                    market_id=request_data["market_id"],
-                    market_title=request_data["market_title"],
-                    market_question=request_data["market_question"],
-                    category=request_data["category"],
-                    current_yes_price=request_data.get("current_yes_price"),
-                    current_no_price=request_data.get("current_no_price"),
-                    resolution_criteria=request_data.get("resolution_criteria", ""),
-                    protected_terms=request_data.get("protected_terms", [])
-                )
+                if user_response in ["yes", "y", "confirm", "execute"]:
+                    ctx.logger.info(f"[{AGENT_NAME}] User confirmed trade execution")
 
-                # Send processing notification
-                response_text = f"""**Market Analysis Started**
+                    # Get pending confirmation data
+                    confirmation_data = pending_confirmations[sender]
+                    decision = confirmation_data["decision_response"]
+                    market_req = confirmation_data["market_request"]
 
-Market: {market_request.market_title}
-Category: {market_request.category}
+                    # Send to Kalshi agent for execution
+                    kalshi_agent_addr = AGENT_ADDRESSES.get("kalshi")
+                    if kalshi_agent_addr:
+                        # Import the ExecuteTradeRequest message type
+                        from protocols.messages import ExecuteTradeRequest
 
-Your analysis is being processed through the multi-agent pipeline:
-1. Evidence collection from specialized agents
-2. Compression of evidence context
-3. Trading decision analysis
-4. Final results
+                        trade_request = ExecuteTradeRequest(
+                            market_id=market_req.market_id,
+                            market_title=market_req.market_title,
+                            action=decision.recommendation,  # YES/NO
+                            side="yes" if decision.recommendation == "YES" else "no",
+                            quantity=1,  # Default to 1 contract
+                            fair_probability=decision.fair_probability,
+                            confidence=decision.confidence
+                        )
 
-Results will be sent when analysis completes (typically 10-30 seconds).
+                        await ctx.send(kalshi_agent_addr, trade_request)
 
-**Note**: Make sure compression and decision agents are deployed with their addresses configured!
-"""
+                        await ctx.send(sender, ChatMessage(
+                            content=[TextContent(text=f"✅ **Trade execution initiated**\n\nSending {decision.recommendation} trade to Kalshi agent...\n\nYou will receive confirmation once the trade is executed.")]
+                        ))
+                        ctx.logger.info(f"[{AGENT_NAME}] Trade request sent to Kalshi agent")
+                    else:
+                        await ctx.send(sender, ChatMessage(
+                            content=[TextContent(text="❌ **Kalshi agent not configured**\n\nCannot execute trade - KALSHI_AGENT_ADDRESS not set.")]
+                        ))
+                        ctx.logger.warning(f"[{AGENT_NAME}] Kalshi agent address not configured")
 
-                response_msg = ChatMessage(
-                    content=[TextContent(text=response_text)]
-                )
-                await ctx.send(sender, response_msg)
+                    # Clean up pending confirmation
+                    del pending_confirmations[sender]
 
-                # Process the market request (this will send FinalAnalysisResult to sender)
-                await handle_market_request(ctx, sender, market_request)
+                    # End session
+                    await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+                    return
 
-            except json.JSONDecodeError:
-                # Not JSON - provide help message
-                help_message = f"""**Orchestrator Agent - Market Analysis Pipeline**
+                elif user_response in ["no", "n", "cancel", "abort"]:
+                    ctx.logger.info(f"[{AGENT_NAME}] User cancelled trade execution")
 
-I coordinate the full multi-agent market analysis pipeline.
+                    await ctx.send(sender, ChatMessage(
+                        content=[TextContent(text="❌ **Trade cancelled**\n\nNo trade will be executed. Analysis results have been saved for your reference.")]
+                    ))
+
+                    # Clean up pending confirmation
+                    del pending_confirmations[sender]
+
+                    # End session
+                    await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+                    return
+                else:
+                    # Invalid response - ask again
+                    await ctx.send(sender, ChatMessage(
+                        content=[TextContent(text=f"⚠️ **Invalid response: '{user_text}'**\n\nPlease reply **'yes'** to execute the trade or **'no'** to cancel.")]
+                    ))
+                    return
+
+            # Handle empty or help requests
+            if not user_text or user_text.lower() in ["help", "?", "how", "what"]:
+                help_message = f"""**Orchestrator Agent - Prediction Market Analysis**
+
+I analyze prediction markets and help you make informed trading decisions!
 
 **How to use me**:
 
-Send a JSON request with market details:
-```json
-{{
-  "market_id": "kalshi-market-123",
-  "market_title": "Will France win the World Cup?",
-  "market_question": "Will France win the 2026 FIFA World Cup?",
-  "category": "sports",
-  "current_yes_price": 0.18,
-  "current_no_price": 0.82,
-  "resolution_criteria": "Resolves YES if France wins the 2026 FIFA World Cup",
-  "protected_terms": ["France", "World Cup", "2026"]
-}}
-```
+Just ask me a natural language question about any prediction market:
 
-**Required fields**:
-- `market_id`: Unique identifier
-- `market_title`: Short title
-- `market_question`: Full question
-- `category`: "financial", "sports", "culture", or "politics"
-- `resolution_criteria`: How the market resolves
+**Sports examples:**
+- "Will France win the World Cup 2026?"
+- "Will Lakers beat the Celtics?"
+- "Will Argentina beat Brazil in the next World Cup qualifier?"
 
-**Optional fields**:
-- `current_yes_price`: Current YES price (0.0-1.0)
-- `current_no_price`: Current NO price (0.0-1.0)
-- `protected_terms`: Terms to preserve during compression
+**Financial examples:**
+- "Will Bitcoin reach $100k by end of 2026?"
+- "Will S&P 500 close above 5000?"
+- "Will Ethereum reach $10k?"
 
 **What I do**:
-1. 🔍 Collect evidence from specialized agents (culture, finance, news)
-2. 🗜️ Compress evidence context efficiently
-3. 🤔 Make trading decision recommendation
-4. 📊 Return complete analysis with reasoning
+1. 🔍 Auto-detect category (sports, financial, culture)
+2. 📊 Gather evidence from specialized agents (ESPN stats, Kalshi data, web sources)
+3. 🗜️ Compress and analyze all evidence
+4. 🤔 Generate trading recommendation (YES/NO/HOLD)
+5. ✅ Ask for your confirmation before executing any trades
 
 **Response includes**:
-- Trading recommendation (YES/NO/HOLD)
-- Confidence level
+- Trading recommendation with confidence level
 - Fair probability estimate
-- Key evidence points
-- Compression metrics
-- Processing time
+- Key supporting evidence
+- Missing information to consider
+- Opportunity to confirm or cancel the trade
 
 **Requirements**:
-- Compression agent must be deployed (standalone_compression_agent.py)
-- Decision agent must be deployed (standalone_decision_agent.py)
-- At least one evidence agent (financial_research_agent.py recommended)
-- Agent addresses configured as environment variables
+- Evidence agents (sports, financial) collect live data
+- Compression agent analyzes context
+- Decision agent generates recommendations
+- Kalshi agent executes trades (only with your approval)
 
-Try sending a market analysis request!
+Try asking me a prediction market question!
 """
 
                 response_msg = ChatMessage(
                     content=[TextContent(text=help_message)]
                 )
                 await ctx.send(sender, response_msg)
+                # End session after help
+                await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+                return
 
-            # End session
-            await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+            # Process natural language question
+            ctx.logger.info(f"[{AGENT_NAME}] Processing natural language question")
+
+            # Auto-detect category
+            category = detect_category(user_text)
+            ctx.logger.info(f"[{AGENT_NAME}] Category detected: {category}")
+
+            # Send initial processing notification
+            await ctx.send(sender, ChatMessage(
+                content=[TextContent(text=f"🔍 **Analyzing your question**\n\nQuestion: {user_text}\nCategory: {category}\n\nGathering evidence from specialized agents...")]
+            ))
+
+            # Create a MarketRequest from the natural language question
+            from uuid import uuid4
+            market_request = MarketRequest(
+                market_id=f"chat-{uuid4()}",
+                market_title=user_text[:100],  # Use question as title
+                market_question=user_text,
+                category=category,
+                resolution_criteria="To be determined by evidence analysis",
+                protected_terms=[],  # Will be extracted by agents
+                current_yes_price=0.5,  # Default middle price
+                current_no_price=0.5,
+            )
+
+            # Process through the pipeline by calling the existing handler
+            # We'll use the request_id to track this for the user
+            await handle_market_request(ctx, sender, market_request)
+
+            ctx.logger.info(f"[{AGENT_NAME}] Natural language request initiated: {market_request.msg_id}")
+
+            # Don't end session yet - wait for pipeline to complete
+            # Session will be ended after final result
 
         except Exception as e:
             ctx.logger.error(f"[{AGENT_NAME}] Error handling chat message: {str(e)}")
