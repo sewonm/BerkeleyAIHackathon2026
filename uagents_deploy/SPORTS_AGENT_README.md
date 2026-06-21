@@ -1,5 +1,9 @@
 # Quorum Sports Agent
 
+![tag:innovationlab](https://img.shields.io/badge/innovationlab-3D8BD3)
+![tag:hackathon](https://img.shields.io/badge/hackathon-5F43F1)
+![domain:sports](https://img.shields.io/badge/sports-32CD32)
+
 Gathers wide raw sports evidence for a Kalshi market and returns it as an EvidenceChunk bundle (Phase 1: stub bundle).
 
 ## Agent Address
@@ -10,9 +14,9 @@ agent1qtl44wzgnadkpqne0rdpz24w85ljknmfszh3k2ws5ttcp8nm7hvuum0gr2g
 
 This address is derived from the fixed seed `quorum-sports-agent-phase1-seed-v1` and is stable across all restarts.
 
-## Badge / Tag
+## Tags
 
-innovationlab
+The `innovationlab` and `hackathon` tags are applied via the shields.io badges at the top of this README — Agentverse derives an agent's marketplace tags from its README badges (not from a separate UI field).
 
 ## Protocol
 
@@ -64,8 +68,8 @@ The bundle always contains at least 2 chunks.
 
 - **Dual-protocol:** exposes both Chat Protocol v0.3.0 (for ASI:One / human chat) and a custom `SportsVideoEvidence` protocol (for `orchestrator_agent.py` machine-to-machine calls).
 - **Fixed seed / stable address:** the `agent1q…` address above never changes as long as the seed constant is unchanged (SA-AGENT-01).
-- **Mailbox enabled:** the agent connects via `mailbox=True` for asynchronous reachability even when not running locally.
-- **Agentverse copy-paste safe:** uses only `uagents`, `uagents_core`, stdlib, and `protocols.messages` — no internal app-package imports.
+- **Mailbox agent:** runs with `mailbox=True` and `publish_agent_details=True`; deploy by running it and connecting via the Agent Inspector link (Connect → Mailbox), which registers it on Agentverse for asynchronous reachability + discovery.
+- **Self-contained:** uses only `uagents`, `uagents_core`, stdlib, and `protocols.messages` — no internal app-package imports, so it runs anywhere.
 
 ## Phase 1 Stub Notice
 

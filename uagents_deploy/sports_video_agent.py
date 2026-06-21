@@ -11,8 +11,13 @@ Dual-protocol agent:
   2. Custom SportsVideoEvidence protocol (orchestrator_agent.py compat)
      — receives EvidenceRequest, returns EvidenceResponse with the same stub bundle.
 
-AGENTVERSE COPY-PASTE SAFE: no app-package imports.
-Only uagents, uagents_core, stdlib, and protocols.messages are used.
+DEPLOY AS A MAILBOX AGENT (mailbox=True): run this file locally, then open the
+Agent Inspector link printed in the terminal -> Connect -> Mailbox -> Finish.
+That connects it to Agentverse and makes it discoverable on ASI:One. (Copy-paste
+into the Agentverse web IDE is the separate *Hosted* agent path — not used here.)
+
+SELF-CONTAINED: no app-package imports — only uagents, uagents_core, stdlib, and
+protocols.messages — so it runs anywhere and connects over a mailbox.
 """
 
 import os
@@ -42,13 +47,27 @@ AGENT_NAME = "sports_video_agent"
 AGENT_SEED = os.getenv("SPORTS_VIDEO_AGENT_SEED", "quorum-sports-agent-phase1-seed-v1")
 AGENT_PORT = 8004
 AGENT_MAILBOX = True
+AGENT_DESCRIPTION = (
+    "Quorum Sports Agent — gathers wide raw sports evidence for a Kalshi market "
+    "and returns it as an EvidenceChunk bundle (Phase 1: stub bundle)."
+)
+# README lives next to this file. publish_agent_details=True publishes the profile
+# (name/description/README) to Agentverse; the marketplace tags (innovationlab,
+# hackathon) are read from the shields.io badges inside this README.
+README_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SPORTS_AGENT_README.md")
 
-agent = Agent(
+_agent_kwargs = dict(
     name=AGENT_NAME,
     seed=AGENT_SEED,
     port=AGENT_PORT,
     mailbox=AGENT_MAILBOX,
+    description=AGENT_DESCRIPTION,
+    publish_agent_details=True,  # publish profile + README -> discoverable on Agentverse/ASI:One
 )
+if os.path.exists(README_PATH):
+    _agent_kwargs["readme_path"] = README_PATH
+
+agent = Agent(**_agent_kwargs)
 
 # ---------------------------------------------------------------------------
 # Inline stub-bundle builder (Phase 1 — same bundle returned by both protocols)
