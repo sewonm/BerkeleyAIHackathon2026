@@ -1,0 +1,70 @@
+{
+  "nodes": [
+    {
+      "id": "1",
+      "source": "sports_video_agent",
+      "text": "France defeated Brazil 2-1 in thrilling quarter-final match. Mbappe scored twice showing excellent form.",
+      "dir": "Y",
+      "score": 0.85,
+      "merged": 0
+    },
+    {
+      "id": "2",
+      "source": "odds_agent",
+      "text": "Betting odds favor France at 62% implied probability to win World Cup 2026",
+      "dir": "Y",
+      "score": 0.72,
+      "merged": 0
+    },
+    {
+      "id": "3",
+      "source": "injury_agent",
+      "text": "Kante questionable with ankle injury, may miss upcoming matches",
+      "dir": "N",
+      "score": 0.68,
+      "merged": 0
+    },
+    {
+      "id": "4",
+      "source": "stats_agent",
+      "text": "France has won 4 of last 5 matches with strong defensive record",
+      "dir": "Y",
+      "score": 0.78,
+      "merged": 0
+    },
+    {
+      "id": "5",
+      "source": "form_agent",
+      "text": "Team morale is high after recent victories against top-tier opponents",
+      "dir": "Y",
+      "score": 0.65,
+      "merged": 0
+    }
+  ],
+  "edges": [
+    {
+      "from": "1",
+      "to": "2",
+      "type": "reinforces",
+      "strength": 0.7
+    },
+    {
+      "from": "1",
+      "to": "4",
+      "type": "reinforces",
+      "strength": 0.8
+    },
+    {
+      "from": "4",
+      "to": "5",
+      "type": "same_sentiment",
+      "strength": 0.6
+    },
+    {
+      "from": "3",
+      "to": "1",
+      "type": "contradicts",
+      "strength": 0.5
+    }
+  ]
+}

@@ -28,14 +28,13 @@ from pydantic import BaseModel, Field
 
 from uagents import Agent, Context, Protocol
 
-# ASI:One chat protocol imports
+# ASI:One chat protocol imports - use the same import as sports_video_agent
 try:
-    from uagents.chat import (
-        chat_protocol_spec,
+    from uagents_core.contrib.protocols.chat import (
         ChatMessage,
+        ChatAcknowledgement,
         TextContent,
-        EndSessionContent,
-        ChatAcknowledgement
+        chat_protocol_spec,
     )
     CHAT_PROTOCOL_AVAILABLE = True
 except ImportError:
@@ -1150,9 +1149,9 @@ agent = Agent(
 # Protocol for agent-to-agent communication
 compression_protocol = Protocol("StandaloneContextCompression")
 
-# Protocol for ASI:One/DeltaV interaction (if available)
+# Protocol for ASI:One/DeltaV interaction (if available) - match sports_video_agent pattern
 if CHAT_PROTOCOL_AVAILABLE:
-    chat_protocol = Protocol("Chat", spec=chat_protocol_spec)
+    chat_protocol = Protocol(spec=chat_protocol_spec)
 
 compressor = AdvancedCompressor(use_claude=True)
 
@@ -1162,7 +1161,7 @@ compressor = AdvancedCompressor(use_claude=True)
 # ============================================================================
 
 if CHAT_PROTOCOL_AVAILABLE:
-    @chat_protocol.on_message(model=ChatMessage)
+    @chat_protocol.on_message(ChatMessage)
     async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         """
         Handle chat messages from ASI:One/DeltaV users.
@@ -1180,21 +1179,30 @@ if CHAT_PROTOCOL_AVAILABLE:
         """
         ctx.logger.info(f"[{AGENT_NAME}] Received chat message from {sender}")
 
-        try:
-            # Send acknowledgement
-            await ctx.send(sender, ChatAcknowledgement())
+        # ACK FIRST — required by Chat Protocol spec (match sports_video_agent pattern)
+        await ctx.send(sender, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
 
-            # Extract text from message content
-            user_text = ""
-            for content in msg.content:
-                if isinstance(content, TextContent):
-                    user_text += content.text
+        try:
+            # Extract text from message using .text() method
+            try:
+                user_text = msg.text()
+            except Exception:
+                user_text = ""
+
+            # Strip @mentions (ASI:One format: "@agent-name command")
+            # Remove @compression-agent or @compression-agent-standalone from start
+            user_text = re.sub(r'^@[\w-]+\s+', '', user_text.strip())
+            user_text = user_text.strip()
 
             ctx.logger.info(f"[{AGENT_NAME}] User query: {user_text[:200]}...")
 
             # Try to parse as JSON first
+            output_format = "text"  # Default to text format
             try:
                 request_data = json.loads(user_text)
+
+                # Check if user wants JSON output
+                output_format = request_data.get("output_format", "text")
 
                 # Build compression request from JSON
                 evidence_chunks = [
@@ -1213,19 +1221,127 @@ if CHAT_PROTOCOL_AVAILABLE:
                 )
 
             except json.JSONDecodeError:
+                # Check if it's a test/demo request
+                user_lower = user_text.lower().strip()
+
+                if user_lower in ["test", "demo", "example", "sample"]:
+                    # Run a demo compression with sample data
+                    ctx.logger.info(f"[{AGENT_NAME}] Running demo compression")
+
+                    # Create sample evidence chunks
+                    sample_chunks = [
+                        EnhancedEvidenceChunk(
+                            market_id="demo-market",
+                            source_agent="sports_agent",
+                            source_type="stats",
+                            text="France won 4 out of their last 5 matches against top-ranked opponents. Current form is excellent with a strong defense."
+                        ),
+                        EnhancedEvidenceChunk(
+                            market_id="demo-market",
+                            source_agent="sports_agent",
+                            source_type="odds",
+                            text="Current betting odds favor France at 58% implied probability. Odds have shifted 5% in favor over the past week."
+                        ),
+                        EnhancedEvidenceChunk(
+                            market_id="demo-market",
+                            source_agent="sports_agent",
+                            source_type="injuries",
+                            text="No major injuries reported in the starting lineup. All key players including Mbappe and Griezmann are healthy and training."
+                        ),
+                        EnhancedEvidenceChunk(
+                            market_id="demo-market",
+                            source_agent="financial_agent",
+                            source_type="market",
+                            text="Kalshi market currently pricing YES at $0.62 and NO at $0.38. Volume is moderate with 1,245 contracts traded."
+                        ),
+                        EnhancedEvidenceChunk(
+                            market_id="demo-market",
+                            source_agent="sports_agent",
+                            source_type="news",
+                            text="However, France struggled in their last friendly match, barely winning 1-0 against a lower-ranked team."
+                        ),
+                    ]
+
+                    request = EnhancedCompressionRequest(
+                        market_id="demo-market",
+                        market_question="Will France win the World Cup 2026?",
+                        resolution_criteria="Resolves YES if France wins the 2026 FIFA World Cup",
+                        current_yes_price=0.62,
+                        current_no_price=0.38,
+                        evidence_chunks=sample_chunks,
+                        aggressiveness=0.5
+                    )
+
+                    # Process compression
+                    result = compressor.compress(request)
+
+                    # Format detailed response
+                    response_text = f"""
+**Demo Compression Complete** 🗜️
+
+**Input:**
+- Market: Will France win the World Cup 2026?
+- Evidence chunks: {len(sample_chunks)}
+- Aggressiveness: 0.5
+
+**Compression Metrics:**
+- Raw tokens: {result.metrics.raw_token_count:,}
+- Compressed tokens: {result.metrics.compressed_token_count:,}
+- **Compression ratio: {result.metrics.compression_ratio:.2f}x**
+- Claims extracted: {result.metrics.total_claims_extracted}
+- Consensus items: {result.metrics.total_consensus_items}
+
+**Top YES Evidence** ({result.metrics.yes_consensus_count} items):
+{chr(10).join('• ' + item.canonical_claim for item in result.top_supporting_evidence[:3])}
+
+**Top NO Evidence** ({result.metrics.no_consensus_count} items):
+{chr(10).join('• ' + item.canonical_claim for item in result.top_opposing_evidence[:3])}
+
+**Contradictions Found:** {len(result.contradictions)}
+{chr(10).join('⚠️ ' + c.summary for c in result.contradictions[:2]) if result.contradictions else '(None detected)'}
+
+**Compressed Context Preview:**
+```
+{result.compressed_context[:500]}...
+```
+
+---
+
+**To test with your own data, send JSON:**
+```json
+{{
+  "market_question": "Your question",
+  "evidence_chunks": [
+    {{"market_id": "m1", "source_agent": "agent", "source_type": "news", "text": "Evidence..."}}
+  ],
+  "aggressiveness": 0.5
+}}
+```
+"""
+
+                    response_msg = ChatMessage(
+                        content=[TextContent(text=response_text)]
+                    )
+                    await ctx.send(sender, response_msg)
+                    return
+
                 # Natural language query - provide help message
                 help_message = """
-**Compression Agent**
+**Compression Agent** 🗜️
 
 I compress evidence for prediction markets using graph-consensus algorithms.
 
-**How to use:**
+**Quick Test:**
+Type **'test'** or **'demo'** to see a sample compression with demo data!
+
+**How to use with your data:**
 
 Send me a JSON request with:
 ```json
 {
   "market_question": "Your market question",
   "resolution_criteria": "How the market resolves",
+  "output_format": "json",
   "evidence_chunks": [
     {
       "market_id": "market-123",
@@ -1239,22 +1355,155 @@ Send me a JSON request with:
 }
 ```
 
-**Aggressiveness**: 0.0 = keep all evidence, 1.0 = only top items
+**Required fields:**
+- `market_question`: The question being analyzed
+- `evidence_chunks`: Array of evidence with text
 
-**Returns**: Compressed context with top YES/NO evidence, contradictions, and information-value scores.
+**Optional fields:**
+- `resolution_criteria`: How the market resolves
+- `current_yes_price`: Current YES price (0.0-1.0)
+- `aggressiveness`: 0.0 = keep all evidence, 1.0 = only top items
+- `output_format`: "text" (default) or "json" (for graph JSON)
+
+**What I return:**
+- **Text format**: Human-readable compressed context
+- **JSON format**: Complete evidence graph with nodes, edges, consensus ledger
+- Top YES/NO evidence ranked by information value
+- Contradictions and conflicts detected
+- Compression metrics and statistics
+
+**Try it:** Type 'demo' to see an example!
 """
                 response_msg = ChatMessage(
                     content=[TextContent(text=help_message)]
                 )
                 await ctx.send(sender, response_msg)
-                await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
                 return
 
             # Process compression
             result = compressor.compress(request)
 
-            # Format response for user
-            response_text = f"""
+            # Format response based on output_format
+            if output_format == "json":
+                # Return JSON graph representation
+                graph_json = {
+                    "result_id": result.result_id,
+                    "request_id": result.request_id,
+                    "market_id": result.market_id,
+                    "mode": result.mode,
+                    "timestamp": result.timestamp.isoformat(),
+
+                    # Evidence Graph
+                    "evidence_graph": {
+                        "graph_id": result.evidence_graph.graph_id,
+                        "market_id": result.evidence_graph.market_id,
+                        "nodes": [
+                            {
+                                "node_id": node.node_id,
+                                "node_type": node.node_type,
+                                "label": node.label,
+                                "properties": node.properties
+                            }
+                            for node in result.evidence_graph.nodes
+                        ],
+                        "edges": [
+                            {
+                                "edge_id": edge.edge_id,
+                                "edge_type": edge.edge_type,
+                                "source_node_id": edge.source_node_id,
+                                "target_node_id": edge.target_node_id,
+                                "weight": edge.weight,
+                                "properties": edge.properties
+                            }
+                            for edge in result.evidence_graph.edges
+                        ]
+                    },
+
+                    # Consensus Ledger
+                    "consensus_ledger": {
+                        "ledger_id": result.consensus_ledger.ledger_id,
+                        "market_id": result.consensus_ledger.market_id,
+                        "consensus_items": [
+                            {
+                                "consensus_id": item.consensus_id,
+                                "canonical_claim": item.canonical_claim,
+                                "direction": item.direction,
+                                "source_count": item.source_count,
+                                "source_agents": item.source_agents,
+                                "source_diversity_score": item.source_diversity_score,
+                                "agreement_level": item.agreement_level,
+                                "consensus_entropy": item.consensus_entropy,
+                                "confidence": item.confidence,
+                                "estimated_probability_shift": item.estimated_probability_shift,
+                                "information_value": item.information_value,
+                                "supporting_claim_ids": item.supporting_claim_ids,
+                                "opposing_claim_ids": item.opposing_claim_ids,
+                                "entities": item.entities
+                            }
+                            for item in result.consensus_ledger.consensus_items
+                        ]
+                    },
+
+                    # Top Evidence
+                    "top_supporting_evidence": [
+                        {
+                            "consensus_id": item.consensus_id,
+                            "canonical_claim": item.canonical_claim,
+                            "direction": item.direction,
+                            "information_value": item.information_value,
+                            "source_count": item.source_count,
+                            "agreement_level": item.agreement_level
+                        }
+                        for item in result.top_supporting_evidence
+                    ],
+                    "top_opposing_evidence": [
+                        {
+                            "consensus_id": item.consensus_id,
+                            "canonical_claim": item.canonical_claim,
+                            "direction": item.direction,
+                            "information_value": item.information_value,
+                            "source_count": item.source_count,
+                            "agreement_level": item.agreement_level
+                        }
+                        for item in result.top_opposing_evidence
+                    ],
+
+                    # Analysis
+                    "contradictions": result.contradictions,
+                    "missing_info": result.missing_info,
+
+                    # Compressed Context
+                    "compressed_context": result.compressed_context,
+
+                    # Metrics
+                    "metrics": {
+                        "raw_token_count": result.metrics.raw_token_count,
+                        "compressed_token_count": result.metrics.compressed_token_count,
+                        "compression_ratio": result.metrics.compression_ratio,
+                        "token_budget": result.metrics.token_budget,
+                        "total_claims_extracted": result.metrics.total_claims_extracted,
+                        "total_consensus_items": result.metrics.total_consensus_items,
+                        "yes_consensus_count": result.metrics.yes_consensus_count,
+                        "no_consensus_count": result.metrics.no_consensus_count,
+                        "neutral_consensus_count": result.metrics.neutral_consensus_count,
+                        "graph_node_count": result.metrics.graph_node_count,
+                        "graph_edge_count": result.metrics.graph_edge_count,
+                        "claude_calls": result.metrics.claude_calls,
+                        "claude_failures": result.metrics.claude_failures,
+                        "heuristic_fallbacks": result.metrics.heuristic_fallbacks
+                    }
+                }
+
+                response_text = f"""
+**Compression Complete - JSON Graph Output**
+
+```json
+{json.dumps(graph_json, indent=2)}
+```
+"""
+            else:
+                # Return human-readable text format
+                response_text = f"""
 **Compression Complete**
 
 **Metrics:**
@@ -1291,9 +1540,10 @@ Send me a JSON request with:
             )
             await ctx.send(sender, error_msg)
 
-        finally:
-            # Always end the session
-            await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+    @chat_protocol.on_message(ChatAcknowledgement)
+    async def handle_ack(ctx: Context, sender: str, msg: ChatAcknowledgement):
+        """Handle acknowledgement messages"""
+        ctx.logger.info(f"[{AGENT_NAME}] ACK from {sender} for msg {msg.acknowledged_msg_id}")
 
 
 # ============================================================================

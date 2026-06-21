@@ -1,0 +1,178 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 800px;
+                 background-color: #222222;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+             #config {
+                 float: left;
+                 width: 400px;
+                 height: 600px;
+             }
+             
+
+             
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+            <div id="config"></div>
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"color": "#00ff00", "font": {"color": "white"}, "id": "1", "label": "sports_video_agent\nFrance defeated Brazil 2-1 in thrilling ...\n\u26050.85", "shape": "dot", "size": 35.5, "title": "Source: sports_video_agent\nDirection: Y\nScore: 0.85\nMerged: 0\n\nText:\nFrance defeated Brazil 2-1 in thrilling quarter-final match. Mbappe scored twice showing excellent form."}, {"color": "#00ff00", "font": {"color": "white"}, "id": "2", "label": "odds_agent\nBetting odds favor France at 62% implied...\n\u26050.72", "shape": "dot", "size": 31.599999999999998, "title": "Source: odds_agent\nDirection: Y\nScore: 0.72\nMerged: 0\n\nText:\nBetting odds favor France at 62% implied probability to win World Cup 2026"}, {"color": "#ff0000", "font": {"color": "white"}, "id": "3", "label": "injury_agent\nKante questionable with ankle injury, ma...\n\u26050.68", "shape": "dot", "size": 30.400000000000002, "title": "Source: injury_agent\nDirection: N\nScore: 0.68\nMerged: 0\n\nText:\nKante questionable with ankle injury, may miss upcoming matches"}, {"color": "#00ff00", "font": {"color": "white"}, "id": "4", "label": "stats_agent\nFrance has won 4 of last 5 matches with ...\n\u26050.78", "shape": "dot", "size": 33.400000000000006, "title": "Source: stats_agent\nDirection: Y\nScore: 0.78\nMerged: 0\n\nText:\nFrance has won 4 of last 5 matches with strong defensive record"}, {"color": "#00ff00", "font": {"color": "white"}, "id": "5", "label": "form_agent\nTeam morale is high after recent victori...\n\u26050.65", "shape": "dot", "size": 29.5, "title": "Source: form_agent\nDirection: Y\nScore: 0.65\nMerged: 0\n\nText:\nTeam morale is high after recent victories against top-tier opponents"}]);
+                  edges = new vis.DataSet([{"arrows": "to", "color": "#00ff00", "from": "1", "label": "reinforces", "title": "reinforces (strength: 0.70)", "to": "2", "width": 4.5}, {"arrows": "to", "color": "#00ff00", "from": "1", "label": "reinforces", "title": "reinforces (strength: 0.80)", "to": "4", "width": 5.0}, {"arrows": "to", "color": "#ffaa00", "from": "4", "label": "same", "title": "same_sentiment (strength: 0.60)", "to": "5", "width": 4.0}, {"arrows": "to", "color": "#ff0000", "from": "3", "label": "contradicts", "title": "contradicts (strength: 0.50)", "to": "1", "width": 3.5}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {
+    "configure": {
+        "enabled": true,
+        "filter": [
+            "physics"
+        ]
+    },
+    "edges": {
+        "color": {
+            "inherit": true
+        },
+        "smooth": {
+            "enabled": true,
+            "type": "dynamic"
+        }
+    },
+    "interaction": {
+        "dragNodes": true,
+        "hideEdgesOnDrag": false,
+        "hideNodesOnDrag": false
+    },
+    "physics": {
+        "barnesHut": {
+            "avoidOverlap": 0,
+            "centralGravity": 0.3,
+            "damping": 0.09,
+            "gravitationalConstant": -80000,
+            "springConstant": 0.001,
+            "springLength": 250
+        },
+        "enabled": true,
+        "stabilization": {
+            "enabled": true,
+            "fit": true,
+            "iterations": 1000,
+            "onlyDynamicEdges": false,
+            "updateInterval": 50
+        }
+    }
+};
+
+                  
+
+
+                  
+                  // if this network requires displaying the configure window,
+                  // put it in its div
+                  options.configure["container"] = document.getElementById("config");
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>
