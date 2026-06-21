@@ -14,6 +14,7 @@ Deployable to Agentverse as the public-facing interface.
 import asyncio
 import json
 import os
+import traceback
 from datetime import datetime
 from typing import Dict, List, Optional
 from uagents import Agent, Context, Protocol
@@ -30,6 +31,21 @@ from protocols.messages import (
     AgentStatus
 )
 
+# ASI:One chat protocol support (optional, gracefully degrades if unavailable)
+try:
+    from uagents.chat import (
+        chat_protocol_spec,
+        ChatMessage,
+        TextContent,
+        EndSessionContent,
+        ChatAcknowledgement
+    )
+    CHAT_PROTOCOL_AVAILABLE = True
+except ImportError:
+    print("[Warning] Chat protocol not available - ASI:One integration disabled")
+    print("Install with: pip install uagents[chat]")
+    CHAT_PROTOCOL_AVAILABLE = False
+
 # Agent configuration
 AGENT_NAME = "orchestrator_agent"
 AGENT_SEED = "orchestrator_agent_seed_phrase_change_in_production"
@@ -44,8 +60,12 @@ agent = Agent(
     mailbox=AGENT_MAILBOX,
 )
 
-# Create protocol
+# Create protocol for agent-to-agent communication
 orchestration_protocol = Protocol("MarketOrchestration")
+
+# Protocol for ASI:One/DeltaV interaction (if available)
+if CHAT_PROTOCOL_AVAILABLE:
+    chat_protocol = Protocol("Chat", spec=chat_protocol_spec)
 
 # Agent addresses — set these as env vars on Agentverse or in local .env
 AGENT_ADDRESSES = {
@@ -280,8 +300,161 @@ async def handle_decision_response(ctx: Context, sender: str, msg: DecisionRespo
     del analysis_state[request_id]
 
 
-# Include protocol
-agent.include(orchestration_protocol)
+# ============================================================================
+# ASI:ONE CHAT PROTOCOL HANDLER (for Agentverse/DeltaV users)
+# ============================================================================
+
+if CHAT_PROTOCOL_AVAILABLE:
+    @chat_protocol.on_message(model=ChatMessage)
+    async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
+        """
+        Handle chat messages from Agentverse chat interface.
+
+        Accepts JSON-formatted MarketRequest or provides help for natural language queries.
+        """
+        ctx.logger.info(f"[{AGENT_NAME}] Received chat message from {sender}")
+
+        try:
+            # Send acknowledgement
+            await ctx.send(sender, ChatAcknowledgement())
+
+            # Extract text from message content
+            user_text = ""
+            for content in msg.content:
+                if isinstance(content, TextContent):
+                    user_text += content.text
+
+            ctx.logger.info(f"[{AGENT_NAME}] User query: {user_text[:200]}...")
+
+            # Try to parse as JSON first
+            try:
+                request_data = json.loads(user_text)
+
+                # Build MarketRequest from JSON
+                market_request = MarketRequest(
+                    market_id=request_data["market_id"],
+                    market_title=request_data["market_title"],
+                    market_question=request_data["market_question"],
+                    category=request_data["category"],
+                    current_yes_price=request_data.get("current_yes_price"),
+                    current_no_price=request_data.get("current_no_price"),
+                    resolution_criteria=request_data.get("resolution_criteria", ""),
+                    protected_terms=request_data.get("protected_terms", [])
+                )
+
+                # Send processing notification
+                response_text = f"""**Market Analysis Started**
+
+Market: {market_request.market_title}
+Category: {market_request.category}
+
+Your analysis is being processed through the multi-agent pipeline:
+1. Evidence collection from specialized agents
+2. Compression of evidence context
+3. Trading decision analysis
+4. Final results
+
+Results will be sent when analysis completes (typically 10-30 seconds).
+
+**Note**: Make sure compression and decision agents are deployed with their addresses configured!
+"""
+
+                response_msg = ChatMessage(
+                    content=[TextContent(text=response_text)]
+                )
+                await ctx.send(sender, response_msg)
+
+                # Process the market request (this will send FinalAnalysisResult to sender)
+                await handle_market_request(ctx, sender, market_request)
+
+            except json.JSONDecodeError:
+                # Not JSON - provide help message
+                help_message = f"""**Orchestrator Agent - Market Analysis Pipeline**
+
+I coordinate the full multi-agent market analysis pipeline.
+
+**How to use me**:
+
+Send a JSON request with market details:
+```json
+{{
+  "market_id": "kalshi-market-123",
+  "market_title": "Will France win the World Cup?",
+  "market_question": "Will France win the 2026 FIFA World Cup?",
+  "category": "sports",
+  "current_yes_price": 0.18,
+  "current_no_price": 0.82,
+  "resolution_criteria": "Resolves YES if France wins the 2026 FIFA World Cup",
+  "protected_terms": ["France", "World Cup", "2026"]
+}}
+```
+
+**Required fields**:
+- `market_id`: Unique identifier
+- `market_title`: Short title
+- `market_question`: Full question
+- `category`: "financial", "sports", "culture", or "politics"
+- `resolution_criteria`: How the market resolves
+
+**Optional fields**:
+- `current_yes_price`: Current YES price (0.0-1.0)
+- `current_no_price`: Current NO price (0.0-1.0)
+- `protected_terms`: Terms to preserve during compression
+
+**What I do**:
+1. 🔍 Collect evidence from specialized agents (culture, finance, news)
+2. 🗜️ Compress evidence context efficiently
+3. 🤔 Make trading decision recommendation
+4. 📊 Return complete analysis with reasoning
+
+**Response includes**:
+- Trading recommendation (YES/NO/HOLD)
+- Confidence level
+- Fair probability estimate
+- Key evidence points
+- Compression metrics
+- Processing time
+
+**Requirements**:
+- Compression agent must be deployed (standalone_compression_agent.py)
+- Decision agent must be deployed (standalone_decision_agent.py)
+- At least one evidence agent (financial_research_agent.py recommended)
+- Agent addresses configured as environment variables
+
+Try sending a market analysis request!
+"""
+
+                response_msg = ChatMessage(
+                    content=[TextContent(text=help_message)]
+                )
+                await ctx.send(sender, response_msg)
+
+            # End session
+            await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+
+        except Exception as e:
+            ctx.logger.error(f"[{AGENT_NAME}] Error handling chat message: {str(e)}")
+            ctx.logger.error(traceback.format_exc())
+
+            error_msg = ChatMessage(
+                content=[TextContent(text=f"**Error**: {str(e)}\n\nPlease check your JSON format and required fields.")]
+            )
+            await ctx.send(sender, error_msg)
+
+            # End session
+            await ctx.send(sender, ChatMessage(content=[EndSessionContent()]))
+
+
+# ============================================================================
+# Protocol Inclusion
+# ============================================================================
+
+# Include custom protocol for agent-to-agent communication
+agent.include(orchestration_protocol, publish_manifest=False)
+
+# Include ASI:One chat protocol if available
+if CHAT_PROTOCOL_AVAILABLE:
+    agent.include(chat_protocol, publish_manifest=True)
 
 
 @agent.on_event("startup")
@@ -289,6 +462,13 @@ async def startup(ctx: Context):
     ctx.logger.info(f"[{AGENT_NAME}] Orchestrator Agent started!")
     ctx.logger.info(f"Address: {agent.address}")
     ctx.logger.info(f"Ready to orchestrate market analysis pipelines")
+
+    # Protocol status
+    ctx.logger.info("Custom protocol: ENABLED (agent-to-agent communication)")
+    if CHAT_PROTOCOL_AVAILABLE:
+        ctx.logger.info("ASI:One chat protocol: ENABLED (DeltaV compatible)")
+    else:
+        ctx.logger.info("ASI:One chat protocol: DISABLED (install uagents[chat])")
 
     # TODO: In production, these would be loaded from environment or discovery
     ctx.logger.info("Note: Configure agent addresses via environment variables or Agentverse discovery")
