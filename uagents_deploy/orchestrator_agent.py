@@ -48,7 +48,7 @@ except ImportError:
 
 # Agent configuration
 AGENT_NAME = "orchestrator_agent"
-AGENT_SEED = "orchestrator_agent_seed_phrase_change_in_production"
+AGENT_SEED = "11bf23bf45f76363d673a7f453c393ba5e5920c91418427c9d44dcff20021437"
 AGENT_PORT = 8000
 AGENT_MAILBOX = True
 

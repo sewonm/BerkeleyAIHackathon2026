@@ -162,7 +162,7 @@ class ConsensusClusterer:
     """
     Clusters similar claims into consensus items.
 
-    Priority: Redis HNSW vector search → sentence-transformers cosine → Jaccard
+    Priority: Redis HNSW vector search -> sentence-transformers cosine -> Jaccard
     """
 
     _INDEX = "sf_cluster_idx"

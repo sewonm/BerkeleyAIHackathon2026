@@ -23,8 +23,8 @@ def cache_get(prompt: str):
         from langcache import LangCache
         with LangCache(server_url=_SERVER_URL, cache_id=_CACHE_ID, api_key=_API_KEY) as lc:
             result = lc.search(prompt=prompt)
-            if result and result.get("response"):
-                return result["response"]
+            if result and result.data:
+                return result.data[0].response
     except Exception:
         pass
     return None

@@ -41,7 +41,7 @@ def store_evidence(market_id: str, agent_name: str, text: str) -> bool:
         from redis_agent_memory import models
         _get_client().add_session_event(
             session_id=market_id,
-            actor_id=agent_name,
+            actor_id=agent_name.replace("_", "-"),
             role=models.MessageRole.USER,
             content=[{"text": text}],
             created_at=int(time.time() * 1000),
@@ -71,7 +71,7 @@ def store_decision(market_id: str, decision: str, confidence: float, reasoning: 
             f"Confidence: {confidence:.0%} | Reasoning: {reasoning}"
         )
         _get_client().bulk_create_long_term_memories(memories=[
-            {"id": f"decision-{market_id}-{int(time.time())}", "text": text}
+            {"id": f"decision-{market_id}-{int(time.time())}", "text": text, "ownerId": "signalforge"}
         ])
         return True
     except Exception:
