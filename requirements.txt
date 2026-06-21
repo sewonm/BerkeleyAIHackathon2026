@@ -27,6 +27,11 @@ redis>=4.0,<5.0
 # Claude API (optional for advanced compression)
 anthropic>=0.18.0
 
+# Path A bridge — HTTP API between the Next.js frontend and the live collectors
+# (app/bridge_server.py). Run: uvicorn app.bridge_server:app --port 8080
+fastapi>=0.110.0
+uvicorn>=0.29.0
+
 # Redis — shared agent memory and caching
 redis>=5.0.5
 

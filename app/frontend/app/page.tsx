@@ -4,6 +4,7 @@ import MarketInput from "@/components/MarketInput";
 import PipelineView from "@/components/PipelineView";
 import ResultsView from "@/components/ResultsView";
 import { AnalysisResult } from "@/lib/mockData";
+import { BridgeAgent, BridgeResponse } from "@/lib/api";
 
 type Step = "input" | "pipeline" | "results";
 
@@ -11,21 +12,34 @@ const STEPS: Step[] = ["input", "pipeline", "results"];
 
 export default function Home() {
   const [step, setStep] = useState<Step>("input");
-  const [market, setMarket] = useState({ question: "", ticker: "", yesPrice: 0.5 });
+  const [market, setMarket] = useState({
+    question: "",
+    ticker: "",
+    yesPrice: 0.5,
+    category: "auto",
+  });
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [agents, setAgents] = useState<BridgeAgent[]>([]);
 
-  const handleAnalyze = (question: string, ticker: string, yesPrice: number) => {
-    setMarket({ question, ticker, yesPrice });
+  const handleAnalyze = (
+    question: string,
+    ticker: string,
+    yesPrice: number,
+    category: string
+  ) => {
+    setMarket({ question, ticker, yesPrice, category });
     setStep("pipeline");
   };
 
-  const handleComplete = (r: AnalysisResult) => {
-    setResult(r);
+  const handleComplete = (data: BridgeResponse) => {
+    setResult(data.result);
+    setAgents(data.agents);
     setStep("results");
   };
 
   const handleReset = () => {
     setResult(null);
+    setAgents([]);
     setStep("input");
   };
 
@@ -66,12 +80,14 @@ export default function Home() {
             question={market.question}
             ticker={market.ticker}
             yesPrice={market.yesPrice}
+            category={market.category}
             onComplete={handleComplete}
           />
         )}
         {step === "results" && result && (
           <ResultsView
             result={result}
+            agents={agents}
             question={market.question}
             ticker={market.ticker}
             onReset={handleReset}

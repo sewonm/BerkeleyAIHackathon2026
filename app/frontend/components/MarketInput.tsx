@@ -3,7 +3,12 @@ import { useState } from "react";
 import { SAMPLE_MARKETS } from "@/lib/mockData";
 
 interface Props {
-  onAnalyze: (question: string, ticker: string, yesPrice: number) => void;
+  onAnalyze: (
+    question: string,
+    ticker: string,
+    yesPrice: number,
+    category: string
+  ) => void;
 }
 
 export default function MarketInput({ onAnalyze }: Props) {
@@ -18,7 +23,13 @@ export default function MarketInput({ onAnalyze }: Props) {
   const handleSubmit = () => {
     if (!question.trim()) return;
     const sample = SAMPLE_MARKETS.find((m) => m.ticker === ticker);
-    onAnalyze(question, ticker || "CUSTOM-MARKET", sample?.yesPrice ?? 0.5);
+    // Custom markets route via the bridge's auto category detection.
+    onAnalyze(
+      question,
+      ticker || "CUSTOM-MARKET",
+      sample?.yesPrice ?? 0.5,
+      sample?.category ?? "auto"
+    );
   };
 
   return (

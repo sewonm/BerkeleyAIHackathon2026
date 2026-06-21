@@ -1,73 +1,78 @@
 "use client";
-import { useEffect, useState } from "react";
-import { AgentState, AnalysisResult, buildMockResult } from "@/lib/mockData";
+import { useEffect, useRef, useState } from "react";
+import { analyzeMarket, BridgeAgent, BridgeResponse } from "@/lib/api";
 
 interface Props {
   question: string;
   ticker: string;
   yesPrice: number;
-  onComplete: (result: AnalysisResult) => void;
+  category: string;
+  onComplete: (data: BridgeResponse) => void;
 }
 
-const AGENTS: Omit<AgentState, "status" | "chunks" | "rawTokens">[] = [
+// Agents we may show. The bridge returns whichever actually ran; until the
+// response arrives they're shown as "processing".
+const KNOWN_AGENTS: Omit<BridgeAgent, "status" | "chunks" | "rawTokens">[] = [
   { id: "financial", label: "Financial Research Agent", icon: "📈" },
   { id: "culture", label: "Culture Web Agent", icon: "🌐" },
   { id: "sports", label: "Sports Video Agent", icon: "⚽" },
-  { id: "politics", label: "Politics News Agent", icon: "📰" },
 ];
 
-const STATUS_LABEL: Record<AgentState["status"], string> = {
+const STATUS_LABEL: Record<BridgeAgent["status"], string> = {
   idle: "Waiting",
   processing: "Collecting evidence...",
   done: "Done",
-  error: "Error",
+  error: "No data",
 };
 
-export default function PipelineView({ question, ticker, yesPrice, onComplete }: Props) {
-  const [agents, setAgents] = useState<AgentState[]>(
-    AGENTS.map((a) => ({ ...a, status: "idle", chunks: 0, rawTokens: 0 }))
+type Phase = "agents" | "compressing" | "deciding" | "done" | "error";
+
+export default function PipelineView({
+  question,
+  ticker,
+  yesPrice,
+  category,
+  onComplete,
+}: Props) {
+  const [agents, setAgents] = useState<BridgeAgent[]>(
+    KNOWN_AGENTS.map((a) => ({ ...a, status: "processing", chunks: 0, rawTokens: 0 }))
   );
-  const [phase, setPhase] = useState<"agents" | "compressing" | "deciding" | "done">("agents");
+  const [phase, setPhase] = useState<Phase>("agents");
   const [rawTotal, setRawTotal] = useState(0);
   const [compressedTokens, setCompressedTokens] = useState(0);
+  const [errorMsg, setErrorMsg] = useState("");
+  const startedRef = useRef(false);
 
   useEffect(() => {
-    const delays = [300, 800, 1400, 1900];
+    // Guard against double-invocation (React 18+ Strict Mode mounts twice).
+    if (startedRef.current) return;
+    startedRef.current = true;
 
-    delays.forEach((delay, i) => {
-      setTimeout(() => {
-        setAgents((prev) =>
-          prev.map((a, idx) => (idx === i ? { ...a, status: "processing" } : a))
-        );
-        setTimeout(() => {
-          const chunks = Math.floor(8 + Math.random() * 20);
-          const tokens = Math.floor(2500 + Math.random() * 5000);
-          setAgents((prev) =>
-            prev.map((a, idx) =>
-              idx === i ? { ...a, status: "done", chunks, rawTokens: tokens } : a
-            )
-          );
-          setRawTotal((t) => t + tokens);
-        }, 1200 + Math.random() * 800);
-      }, delay);
-    });
+    (async () => {
+      try {
+        const data = await analyzeMarket({ question, ticker, yesPrice, category });
 
-    // After all agents done → compress
-    setTimeout(() => {
-      setPhase("compressing");
-      setTimeout(() => {
-        const compressed = Math.floor(1800 + Math.random() * 600);
-        setCompressedTokens(compressed);
-        setPhase("deciding");
+        // Real per-agent results from the live collectors.
+        setAgents(data.agents);
+        setRawTotal(data.rawTokens);
+
+        // Brief staged reveal so the compression/decision steps read clearly.
+        setPhase("compressing");
         setTimeout(() => {
-          setPhase("done");
-          onComplete(buildMockResult(yesPrice));
-        }, 1500);
-      }, 1800);
-    }, 5500);
+          setCompressedTokens(data.compressedTokens);
+          setPhase("deciding");
+          setTimeout(() => {
+            setPhase("done");
+            onComplete(data);
+          }, 700);
+        }, 600);
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : String(e));
+        setPhase("error");
+        setAgents((prev) => prev.map((a) => ({ ...a, status: "error" })));
+      }
+    })();
   }, []);
-
-  const allDone = agents.every((a) => a.status === "done");
 
   return (
     <div className="flex flex-col gap-6">
@@ -75,6 +80,17 @@ export default function PipelineView({ question, ticker, yesPrice, onComplete }:
         <p className="text-zinc-500 text-xs font-mono mb-1">{ticker}</p>
         <h2 className="text-white text-xl font-semibold">{question}</h2>
       </div>
+
+      {phase === "error" && (
+        <div className="rounded-xl border border-red-500 bg-red-500/10 p-4 text-sm text-red-300">
+          <p className="font-semibold mb-1">⚠ Could not reach the agent bridge</p>
+          <p className="text-red-400/80 break-all">{errorMsg}</p>
+          <p className="text-zinc-400 mt-2">
+            Start it from the repo root:{" "}
+            <code className="font-mono">uvicorn app.bridge_server:app --port 8080</code>
+          </p>
+        </div>
+      )}
 
       {/* Agent cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -86,6 +102,8 @@ export default function PipelineView({ question, ticker, yesPrice, onComplete }:
                 ? "border-teal-500 bg-teal-500/5"
                 : a.status === "processing"
                 ? "border-yellow-500 bg-yellow-500/5"
+                : a.status === "error"
+                ? "border-zinc-700 bg-zinc-800 opacity-60"
                 : "border-zinc-700 bg-zinc-800 opacity-50"
             }`}
           >
@@ -132,7 +150,7 @@ export default function PipelineView({ question, ticker, yesPrice, onComplete }:
               <span className="text-xs text-yellow-300 font-mono animate-pulse">Running...</span>
             )}
           </div>
-          {phase !== "compressing" && rawTotal > 0 && (
+          {phase !== "compressing" && rawTotal > 0 && compressedTokens > 0 && (
             <div className="flex items-center gap-4">
               <div className="text-center">
                 <p className="text-2xl font-bold text-zinc-300">{rawTotal.toLocaleString()}</p>
@@ -165,7 +183,7 @@ export default function PipelineView({ question, ticker, yesPrice, onComplete }:
         >
           <div className="flex items-center gap-3">
             <span className="text-lg">🤖</span>
-            <span className="text-white font-medium">Decision Agent (Claude)</span>
+            <span className="text-white font-medium">Decision Agent (heuristic)</span>
             {phase === "deciding" && (
               <span className="text-xs text-yellow-300 font-mono animate-pulse">Reasoning...</span>
             )}

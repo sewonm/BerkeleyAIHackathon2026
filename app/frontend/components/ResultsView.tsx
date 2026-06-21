@@ -1,8 +1,10 @@
 "use client";
 import { AnalysisResult } from "@/lib/mockData";
+import { BridgeAgent } from "@/lib/api";
 
 interface Props {
   result: AnalysisResult;
+  agents?: BridgeAgent[];
   question: string;
   ticker: string;
   onReset: () => void;
@@ -21,7 +23,9 @@ const RISK_CHECKS = [
   { label: "Market allowed", key: "market" as const },
 ];
 
-export default function ResultsView({ result, question, ticker, onReset }: Props) {
+export default function ResultsView({ result, agents = [], question, ticker, onReset }: Props) {
+  const totalChunks = agents.reduce((n, a) => n + a.chunks, 0);
+  const usedAgents = agents.filter((a) => a.status === "done");
   const riskChecks = [
     result.confidence >= 0.7,
     Math.abs(result.edge) >= 0.05,
@@ -97,6 +101,65 @@ export default function ResultsView({ result, question, ticker, onReset }: Props
           {(((result.rawTokens - result.compressedTokens) / result.rawTokens) * 100).toFixed(0)}% reduction
         </p>
       </div>
+
+      {/* Agents utilized — real per-agent evidence from the live collectors */}
+      {agents.length > 0 && (
+        <div className="rounded-xl border border-zinc-700 bg-zinc-800 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-zinc-300 font-semibold">🔗 Agents Utilized</h3>
+            <span className="text-xs text-zinc-500">
+              {usedAgents.length} agent{usedAgents.length === 1 ? "" : "s"} · {totalChunks} live evidence chunks
+            </span>
+          </div>
+          <div className="flex flex-col gap-4">
+            {agents.map((a) => (
+              <div key={a.id} className="border-l-2 border-teal-600 pl-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span>{a.icon}</span>
+                  <span className="text-sm text-zinc-200 font-medium">{a.label}</span>
+                  <span
+                    className={`text-xs font-mono px-2 py-0.5 rounded-full ${
+                      a.status === "done"
+                        ? "bg-teal-500/20 text-teal-300"
+                        : "bg-zinc-700 text-zinc-500"
+                    }`}
+                  >
+                    {a.status === "done" ? `${a.chunks} chunks · ${a.rawTokens.toLocaleString()} tok` : "no data"}
+                  </span>
+                </div>
+                {a.sources && a.sources.length > 0 && (
+                  <ul className="flex flex-col gap-1.5 mt-2">
+                    {a.sources.map((s, i) => (
+                      <li key={i} className="text-xs">
+                        <div className="flex items-center gap-2">
+                          {s.via && (
+                            <span className="font-mono text-zinc-600">[{s.via}]</span>
+                          )}
+                          {s.url ? (
+                            <a
+                              href={s.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-teal-400 hover:text-teal-300 truncate max-w-md"
+                            >
+                              {s.url}
+                            </a>
+                          ) : (
+                            <span className="text-zinc-500">{s.kind || "evidence"}</span>
+                          )}
+                        </div>
+                        {s.snippet && (
+                          <p className="text-zinc-500 mt-0.5 leading-snug">{s.snippet}</p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Evidence + reasoning */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
