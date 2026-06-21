@@ -8,7 +8,7 @@ from app.agents.politics_news_agent import PoliticsNewsAgent
 from app.agents.financial_research_agent import FinancialResearchAgent
 from app.agents.market_agent import MarketAgent
 from app.agents.decision_agent import DecisionAgent
-from app.compression.unified_compressor import UnifiedCompressor
+from app.compression.compressor import Compressor
 from app.schemas.market import Market
 from app.schemas.decision import Decision
 from app.schemas.compression import CompressionResult
@@ -49,7 +49,7 @@ class Coordinator:
         self.decision_agent = DecisionAgent()
 
         # Initialize compressor
-        self.compressor = UnifiedCompressor()
+        self.compressor = Compressor()
 
     def run(self, market: Market) -> Dict[str, Any]:
         """
