@@ -10,10 +10,22 @@ interface Props {
   onComplete: (data: BridgeResponse) => void;
 }
 
-const AGENT_META: Record<string, { label: string; icon: string; desc: string }> = {
-  financial: { label: "Financial Research Agent", icon: "📈", desc: "Fetching Kalshi market data, orderbook depth, price history" },
-  culture:   { label: "Culture Web Agent",        icon: "🌐", desc: "Searching live web sources, news, and cultural signals" },
-  sports:    { label: "Sports Video Agent",       icon: "⚽", desc: "Pulling ESPN stats, injury reports, odds, and team data" },
+const AGENT_META: Record<string, { label: string; icon: string; desc: string; messages: string[] }> = {
+  financial: {
+    label: "Financial Research Agent", icon: "📈",
+    desc: "Fetching Kalshi market data, orderbook depth, price history",
+    messages: ["Fetching live Kalshi orderbook data...", "Pulling price history and volume...", "Analyzing market microstructure..."],
+  },
+  culture: {
+    label: "Culture Web Agent", icon: "🌐",
+    desc: "Searching live web sources, news, and cultural signals",
+    messages: ["Searching live web sources via Serper...", "Fetching article content...", "Extracting cultural signals and sentiment..."],
+  },
+  sports: {
+    label: "Sports Video Agent", icon: "⚽",
+    desc: "Pulling ESPN stats, injury reports, odds, and team data",
+    messages: ["Querying ESPN API for live stats...", "Checking injury reports and lineups...", "Fetching betting odds and win probability..."],
+  },
 };
 
 type Phase = "routing" | "agents" | "compressing" | "deciding" | "executing" | "done" | "error";
@@ -67,12 +79,15 @@ export default function PipelineView({ question, ticker, yesPrice, category, onC
   })();
 
   const agentMeta = AGENT_META[pendingCategory] ?? AGENT_META["culture"];
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const resolvedAgent = dispatchedAgent ?? { id: pendingCategory, label: agentMeta.label, icon: agentMeta.icon, status: "processing" as const, chunks: 0, rawTokens: 0 };
+
+  // Use agent-specific messages during evidence collection phase
+  const phaseMessages = phase === "agents"
+    ? agentMeta.messages
+    : (PHASE_MESSAGES[phase] ?? []);
 
   // Rotate status messages within each phase
   useEffect(() => {
-    const msgs = PHASE_MESSAGES[phase] ?? [];
+    const msgs = phase === "agents" ? agentMeta.messages : (PHASE_MESSAGES[phase] ?? []);
     setMsgIndex(0);
     if (msgs.length <= 1) return;
     const t = setInterval(() => setMsgIndex(i => (i + 1) % msgs.length), 2200);
@@ -141,7 +156,7 @@ export default function PipelineView({ question, ticker, yesPrice, category, onC
     );
   }
 
-  const currentMsg = (PHASE_MESSAGES[phase] ?? [""])[msgIndex];
+  const currentMsg = (phaseMessages ?? [""])[msgIndex] ?? "";
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 fade-in">

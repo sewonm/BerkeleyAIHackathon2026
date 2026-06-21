@@ -28,7 +28,7 @@ Rules:
 - confidence: 0.7-0.9 when you have clear evidence, 0.6-0.7 when moderate, below 0.6 only if truly uncertain
 - fair_probability: your honest estimate — do not anchor too closely to the market price, form your own view
 - key_evidence: quote specific facts, numbers, names from the evidence (not generic statements)
-- missing_info: what specific data would change your recommendation"""
+- missing_info: 2 specific data points that would materially change your recommendation (e.g. "Recent injury status for [player]", "Q2 2026 CPI release", "Box office opening weekend numbers") — be concrete, not generic"""
 
 
 class DecisionAgent:
