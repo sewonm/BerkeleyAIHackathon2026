@@ -189,6 +189,40 @@ def _format_routing_note(decision) -> str:
     )
 
 
+def _format_evidence_digest(state, max_chunks: int = 8, snippet_len: int = 240) -> str:
+    """DEMO FALLBACK: render collected evidence chunks into a readable chat reply for the
+    user when the downstream compression/decision agents are not wired. Category-agnostic —
+    works for any evidence agent. Remove once the full pipeline is connected."""
+    chunks = state.all_evidence_chunks
+    mr = state.market_request
+    agents = ", ".join(state.agents_used) or "evidence agent"
+
+    # Count chunks by source strength (anchor/noisy/...) falling back to source_type.
+    by_strength: dict[str, int] = {}
+    for c in chunks:
+        key = (c.metadata or {}).get("source_strength") or c.source_type
+        by_strength[key] = by_strength.get(key, 0) + 1
+    breakdown = " / ".join(f"{n} {k}" for k, n in by_strength.items()) or "0"
+
+    lines = [
+        f"📊 **Evidence collected for:** {mr.market_question}",
+        f"**Category:** {mr.category} · **Agent(s):** {agents} · "
+        f"**{len(chunks)} chunk(s)** ({breakdown})",
+        "_Downstream compression/decision agents aren't wired yet — showing the raw evidence digest._",
+        "",
+        "**Top evidence:**",
+    ]
+    for c in chunks[:max_chunks]:
+        kind = (c.metadata or {}).get("kind") or c.source_type
+        text = " ".join((c.text or "").split())
+        if len(text) > snippet_len:
+            text = text[:snippet_len].rstrip() + "…"
+        lines.append(f"• [{kind}] {text}")
+    if len(chunks) > max_chunks:
+        lines.append(f"…and {len(chunks) - max_chunks} more chunk(s).")
+    return "\n".join(lines)
+
+
 def _resolve_dispatch(category: str):
     """DISPATCH-02/03: resolve a routed category to (target_key, address).
     Returns (None, None) when the category has no wired agent (politics/none),
@@ -238,6 +272,7 @@ async def handle_market_request(ctx: Context, sender: str, msg: MarketRequest):
     # Build the EvidenceRequest from the already-router-mapped MarketRequest fields
     # (DISPATCH-01 done in plan 01 — no protocol change here)
     evidence_request = EvidenceRequest(
+        msg_id=msg.msg_id,   # reuse MarketRequest id so EvidenceResponse.request_id correlates to pipeline state
         market_question=msg.market_question,
         market_id=msg.market_id,
         category=msg.category,
@@ -294,21 +329,32 @@ async def handle_evidence_response(ctx: Context, sender: str, msg: EvidenceRespo
 
     # Check if we have all evidence we're waiting for
     # For MVP, we only request from one agent, so proceed immediately
-    ctx.logger.info(f"[{AGENT_NAME}] Step 2: Compressing evidence")
-
-    # Send evidence to compression agent
-    compression_request = CompressionRequest(
-        market_question="Market analysis",  # Would use actual market question
-        protected_terms=[],  # Would use actual protected terms
-        evidence_chunks=state.all_evidence_chunks,
-        token_budget=3000
-    )
-
     compression_agent_addr = AGENT_ADDRESSES.get("compression")
     if compression_agent_addr:
+        # Step 2: compress evidence -> (later) decision -> confirmation (full pipeline)
+        ctx.logger.info(f"[{AGENT_NAME}] Step 2: Compressing evidence")
+        compression_request = CompressionRequest(
+            market_question=state.market_request.market_question,
+            protected_terms=list(state.market_request.protected_terms),
+            evidence_chunks=state.all_evidence_chunks,
+            token_budget=3000,
+        )
         await ctx.send(compression_agent_addr, compression_request)
     else:
-        ctx.logger.warning(f"[{AGENT_NAME}] Compression agent address not configured")
+        # DEMO FALLBACK (compression/decision agents unwired): don't go silent —
+        # return the collected evidence digest to the user and end the session,
+        # mirroring the DISPATCH-03 clean-handoff pattern. Remove once compression
+        # + decision are wired.
+        ctx.logger.warning(
+            "[%s] Compression agent not configured — returning evidence digest to user (fallback)",
+            AGENT_NAME,
+        )
+        if state.requester_address and CHAT_PROTOCOL_AVAILABLE:
+            await ctx.send(state.requester_address, ChatMessage(
+                content=[TextContent(text=_format_evidence_digest(state))]
+            ))
+            await ctx.send(state.requester_address, ChatMessage(content=[EndSessionContent()]))
+        analysis_state.pop(request_id, None)   # guard: no stale state -> no hang
 
 
 @orchestration_protocol.on_message(model=CompressionResponse)
