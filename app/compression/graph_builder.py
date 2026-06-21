@@ -232,29 +232,32 @@ class ConsensusClusterer:
 
         return clusters
 
+    _st_model = None  # shared across instances, loaded once
+
     def _calculate_similarity(self, claim1: ExtractedClaim, claim2: ExtractedClaim) -> float:
-        """
-        Calculate similarity between two claims using Jaccard similarity.
+        score = self._semantic_similarity(claim1.canonical_text, claim2.canonical_text)
+        if score is not None:
+            return score
 
-        Args:
-            claim1: First claim
-            claim2: Second claim
-
-        Returns:
-            Similarity score (0-1)
-        """
-        # Tokenize
+        # Fallback: Jaccard similarity
         tokens1 = set(claim1.canonical_text.lower().split())
         tokens2 = set(claim2.canonical_text.lower().split())
-
-        # Jaccard similarity
         intersection = tokens1 & tokens2
         union = tokens1 | tokens2
+        return len(intersection) / len(union) if union else 0.0
 
-        if not union:
-            return 0.0
-
-        return len(intersection) / len(union)
+    def _semantic_similarity(self, text1: str, text2: str) -> float | None:
+        """Cosine similarity via sentence-transformers. Returns None if unavailable."""
+        try:
+            import numpy as np
+            from sentence_transformers import SentenceTransformer
+            if ConsensusClusterer._st_model is None:
+                ConsensusClusterer._st_model = SentenceTransformer("all-MiniLM-L6-v2")
+            emb = ConsensusClusterer._st_model.encode([text1, text2])
+            cosine = float(np.dot(emb[0], emb[1]) / (np.linalg.norm(emb[0]) * np.linalg.norm(emb[1])))
+            return max(0.0, cosine)
+        except Exception:
+            return None
 
     def _create_consensus_item(
         self,
