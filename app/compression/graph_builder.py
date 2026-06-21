@@ -200,52 +200,48 @@ class ConsensusClusterer:
     # ------------------------------------------------------------------
 
     def _try_setup_redis(self, claims: List[ExtractedClaim]) -> bool:
-        """Build a temporary HNSW index in Redis with all claim embeddings."""
+        """Build a temporary HNSW index in Redis using RedisVL."""
         try:
             import os
             import numpy as np
             from sentence_transformers import SentenceTransformer
-            import redis as redis_lib
-            from redis.commands.search.field import VectorField
-            from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+            from redisvl.index import SearchIndex
 
             if ConsensusClusterer._st_model is None:
                 ConsensusClusterer._st_model = SentenceTransformer("all-MiniLM-L6-v2")
 
+            schema = {
+                "index": {"name": self._INDEX, "prefix": self._PREFIX},
+                "fields": [
+                    {"name": "cid", "type": "tag"},
+                    {"name": "emb", "type": "vector", "attrs": {
+                        "dims": self._DIM,
+                        "distance_metric": "cosine",
+                        "algorithm": "hnsw",
+                        "datatype": "float32",
+                    }},
+                ],
+            }
+
             url = os.getenv("REDIS_URL", "redis://localhost:6379")
-            self._redis_client = redis_lib.from_url(url, decode_responses=False)
-            self._redis_client.ping()
+            self._index = SearchIndex.from_dict(schema)
+            self._index.connect(redis_url=url)
+            self._index.create(overwrite=True)
 
-            # Drop stale index if present
-            try:
-                self._redis_client.ft(self._INDEX).dropindex(delete_documents=True)
-            except Exception:
-                pass
-
-            self._redis_client.ft(self._INDEX).create_index(
-                [VectorField("emb", "HNSW", {
-                    "TYPE": "FLOAT32", "DIM": self._DIM, "DISTANCE_METRIC": "COSINE"
-                })],
-                definition=IndexDefinition(prefix=[self._PREFIX], index_type=IndexType.HASH)
-            )
-
-            # Batch-encode and upsert all claims
             texts = [c.canonical_text for c in claims]
             embeddings = ConsensusClusterer._st_model.encode(texts, batch_size=32)
-            pipe = self._redis_client.pipeline(transaction=False)
-            for claim, emb in zip(claims, embeddings):
-                pipe.hset(f"{self._PREFIX}{claim.claim_id}", mapping={
-                    "emb": emb.astype(np.float32).tobytes(),
-                    "cid": claim.claim_id,
-                })
-            pipe.execute()
+            data = [
+                {"cid": claim.claim_id, "emb": emb.astype(np.float32).tolist()}
+                for claim, emb in zip(claims, embeddings)
+            ]
+            self._index.load(data, id_field="cid")
             return True
         except Exception:
             return False
 
     def _cleanup_redis(self):
         try:
-            self._redis_client.ft(self._INDEX).dropindex(delete_documents=True)
+            self._index.delete(drop=True)
         except Exception:
             pass
 
@@ -287,29 +283,28 @@ class ConsensusClusterer:
         return clusters
 
     def _redis_knn(self, query_claim: ExtractedClaim, candidate_ids: set) -> List[str]:
-        """KNN query against Redis HNSW index. Returns claim_ids above threshold."""
+        """KNN query via RedisVL. Returns claim_ids above threshold."""
         try:
             import numpy as np
-            from redis.commands.search.query import Query
+            from redisvl.query import VectorQuery
 
             vec = ConsensusClusterer._st_model.encode([query_claim.canonical_text])[0]
             k = min(len(candidate_ids) + 1, 50)
 
-            q = (Query(f"(*)=>[KNN {k} @emb $vec AS dist]")
-                 .sort_by("dist")
-                 .return_fields("dist", "cid")
-                 .dialect(2))
-
-            results = self._redis_client.ft(self._INDEX).search(
-                q, query_params={"vec": vec.astype(np.float32).tobytes()}
+            query = VectorQuery(
+                vector=vec.astype(np.float32).tolist(),
+                vector_field_name="emb",
+                return_fields=["cid", "vector_distance"],
+                num_results=k,
             )
+            results = self._index.query(query)
 
             matches = []
-            for doc in results.docs:
-                cid = getattr(doc, "cid", None)
+            for r in results:
+                cid = r.get("cid")
                 if not cid or cid not in candidate_ids:
                     continue
-                similarity = max(0.0, 1.0 - float(getattr(doc, "dist", 1.0)))
+                similarity = max(0.0, 1.0 - float(r.get("vector_distance", 1.0)))
                 if similarity >= self.similarity_threshold:
                     matches.append(cid)
             return matches

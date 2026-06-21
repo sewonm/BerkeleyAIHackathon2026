@@ -22,8 +22,9 @@ anthropic>=0.18.0
 
 # Redis — shared agent memory and vector search
 redis>=5.0.5
+redisvl>=0.3.0
 
-# Semantic embeddings for Redis vector search in ConsensusClusterer
+# Semantic embeddings for Redis HNSW vector search in ConsensusClusterer
 sentence-transformers>=2.7.0
 
 # Note: For the MVP standalone app, uagents is not required.
