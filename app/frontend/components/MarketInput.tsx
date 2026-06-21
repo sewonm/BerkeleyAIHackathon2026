@@ -11,6 +11,12 @@ interface Props {
   ) => void;
 }
 
+const CATEGORY_ICONS: Record<string, string> = {
+  financial: "📈",
+  culture: "🎬",
+  sports: "⚽",
+};
+
 export default function MarketInput({ onAnalyze }: Props) {
   const [question, setQuestion] = useState("");
   const [ticker, setTicker] = useState("");
@@ -23,7 +29,6 @@ export default function MarketInput({ onAnalyze }: Props) {
   const handleSubmit = () => {
     if (!question.trim()) return;
     const sample = SAMPLE_MARKETS.find((m) => m.ticker === ticker);
-    // Custom markets route via the bridge's auto category detection.
     onAnalyze(
       question,
       ticker || "CUSTOM-MARKET",
@@ -32,62 +37,108 @@ export default function MarketInput({ onAnalyze }: Props) {
     );
   };
 
+  const selected = SAMPLE_MARKETS.find((m) => m.ticker === ticker);
+
   return (
-    <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-4xl font-bold text-white mb-2">SignalForge</h1>
-        <p className="text-zinc-400 text-lg">
-          Multi-agent prediction market intelligence · Powered by Fetch.ai &amp; Kalshi
+    <div className="flex flex-col gap-10 fade-in-up">
+      {/* Hero */}
+      <div className="text-center pt-4">
+        <div className="inline-flex items-center gap-2 bg-teal-500/10 border border-teal-500/20 rounded-full px-4 py-1.5 text-xs text-teal-400 font-medium mb-6">
+          <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+          Multi-agent prediction market intelligence
+        </div>
+        <h1 className="text-5xl font-bold text-white tracking-tight mb-3">
+          Signal<span className="text-teal-400">Forge</span>
+        </h1>
+        <p className="text-zinc-400 text-lg max-w-lg mx-auto leading-relaxed">
+          Research agents collect evidence, compress it, and execute trades on Kalshi — automatically.
         </p>
       </div>
 
-      <div className="flex flex-col gap-3">
-        <label className="text-zinc-300 text-sm font-medium uppercase tracking-wider">
-          Market Question
-        </label>
-        <textarea
-          className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-teal-500 transition"
-          rows={2}
-          placeholder="e.g. Will the Fed raise rates in July 2026?"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-        />
-        <input
-          className="bg-zinc-800 border border-zinc-700 rounded-xl p-4 text-white placeholder-zinc-500 focus:outline-none focus:border-teal-500 transition"
-          placeholder="Kalshi ticker (e.g. FED-RATES-JUL26)"
-          value={ticker}
-          onChange={(e) => setTicker(e.target.value)}
-        />
+      {/* Input card */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">
+            Market Question
+          </label>
+          <textarea
+            className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl px-4 py-3 text-white placeholder-zinc-600 resize-none focus:outline-none focus:border-teal-500/60 focus:bg-zinc-800 transition text-sm leading-relaxed"
+            rows={2}
+            placeholder="e.g. Will the Fed raise rates in July 2026?"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">
+            Kalshi Ticker
+          </label>
+          <input
+            className="bg-zinc-800/60 border border-zinc-700/60 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-teal-500/60 focus:bg-zinc-800 transition font-mono text-sm"
+            placeholder="FED-RATES-JUL26"
+            value={ticker}
+            onChange={(e) => setTicker(e.target.value)}
+          />
+        </div>
       </div>
 
+      {/* Sample markets */}
       <div>
-        <p className="text-zinc-500 text-sm mb-3">Or pick a sample market:</p>
+        <p className="text-zinc-500 text-xs font-semibold uppercase tracking-wider mb-3">
+          Sample Markets
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {SAMPLE_MARKETS.map((m) => (
-            <button
-              key={m.ticker}
-              onClick={() => handleSample(m)}
-              className={`text-left p-4 rounded-xl border transition ${
-                ticker === m.ticker
-                  ? "border-teal-500 bg-teal-500/10 text-white"
-                  : "border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-500"
-              }`}
-            >
-              <p className="text-xs text-zinc-500 mb-1 font-mono">{m.ticker}</p>
-              <p className="text-sm leading-snug">{m.question}</p>
-              <p className="text-xs mt-2 text-teal-400">YES {(m.yesPrice * 100).toFixed(0)}¢</p>
-            </button>
-          ))}
+          {SAMPLE_MARKETS.map((m) => {
+            const isSelected = ticker === m.ticker;
+            return (
+              <button
+                key={m.ticker}
+                onClick={() => handleSample(m)}
+                className={`text-left p-4 rounded-xl border transition-all group ${
+                  isSelected
+                    ? "border-teal-500/60 bg-teal-500/8 shadow-lg shadow-teal-500/5"
+                    : "border-zinc-800 bg-zinc-900 hover:border-zinc-600 hover:bg-zinc-800/60"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <span className="text-lg">{CATEGORY_ICONS[m.category] ?? "🔎"}</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                    isSelected ? "bg-teal-500/20 text-teal-300" : "bg-zinc-800 text-zinc-500"
+                  }`}>
+                    YES {(m.yesPrice * 100).toFixed(0)}¢
+                  </span>
+                </div>
+                <p className="text-sm text-zinc-200 leading-snug mb-2 group-hover:text-white transition">
+                  {m.question}
+                </p>
+                <p className="text-xs text-zinc-600 font-mono">{m.ticker}</p>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <button
         onClick={handleSubmit}
         disabled={!question.trim()}
-        className="w-full py-4 rounded-xl bg-teal-500 hover:bg-teal-400 disabled:opacity-30 disabled:cursor-not-allowed text-black font-bold text-lg transition"
+        className="w-full py-4 rounded-xl bg-teal-500 hover:bg-teal-400 active:bg-teal-600 disabled:opacity-20 disabled:cursor-not-allowed text-black font-bold text-base transition-all shadow-lg shadow-teal-500/20 hover:shadow-teal-400/30 flex items-center justify-center gap-2"
       >
-        Run Analysis →
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 8h10M8 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        Run Analysis
       </button>
+
+      {/* Tech stack badges */}
+      <div className="flex items-center justify-center gap-4 text-xs text-zinc-600 pb-2">
+        {["Fetch.ai uAgents", "Kalshi API", "Claude", "Context Compression"].map((t) => (
+          <span key={t} className="flex items-center gap-1.5">
+            <span className="w-1 h-1 rounded-full bg-zinc-700" />
+            {t}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
