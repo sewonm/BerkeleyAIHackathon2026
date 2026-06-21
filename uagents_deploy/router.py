@@ -189,6 +189,16 @@ def _route_llm(question: str) -> Optional[RouterDecision]:
     return None
 
 
+def _protected_term_postcheck(rewritten: str, terms: set) -> bool:
+    """Stub in plan 01; real impl (case-insensitive substring check) in plan 02."""
+    return True  # stub: always passes; plan 02 implements correctly
+
+
+def _validate_and_build(data: dict, original_question: str, tier: str) -> Optional[RouterDecision]:
+    """Stub in plan 01; real impl in plan 02. Returns None -> falls to heuristic."""
+    return None
+
+
 def _route_heuristic(question: str) -> RouterDecision:
     """
     Rung 2 — Scored-keyword classifier. Returns RouterDecision with tier="heuristic".
