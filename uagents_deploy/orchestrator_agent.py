@@ -14,9 +14,20 @@ Deployable to Agentverse as the public-facing interface.
 import asyncio
 import json
 import os
+import sys
 import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
+
+# Load .env from repo root (one level up from uagents_deploy/)
+_repo_root = Path(__file__).parent.parent
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_repo_root / ".env")
+except ImportError:
+    pass
+
 from uagents import Agent, Context, Protocol
 from protocols.messages import (
     MarketRequest,
@@ -49,14 +60,12 @@ except ImportError:
 AGENT_NAME = "orchestrator_agent"
 AGENT_SEED = "11bf23bf45f76363d673a7f453c393ba5e5920c91418427c9d44dcff20021437"
 AGENT_PORT = 8000
-_AGENTVERSE_KEY = os.getenv("AGENTVERSE_API_KEY", "")
-
 # Create the agent
 agent = Agent(
     name=AGENT_NAME,
     seed=AGENT_SEED,
     port=AGENT_PORT,
-    mailbox=_AGENTVERSE_KEY if _AGENTVERSE_KEY else True,
+    mailbox=True,
 )
 
 # Create protocol for agent-to-agent communication
@@ -414,7 +423,7 @@ if CHAT_PROTOCOL_AVAILABLE:
 
         try:
             # Send acknowledgement
-            await ctx.send(sender, ChatAcknowledgement())
+            await ctx.send(sender, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
 
             # Extract text from message content
             user_text = ""
